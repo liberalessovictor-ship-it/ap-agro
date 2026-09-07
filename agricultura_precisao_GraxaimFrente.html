@@ -1,0 +1,1130 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Talhão · Agricultura de Precisão</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #F6F4EC;
+    --panel: #FFFFFF;
+    --ink: #23291F;
+    --ink-soft: #5B6157;
+    --sidebar: #23291B;
+    --sidebar-ink: #D9D6C6;
+    --sidebar-ink-dim: #8B8F7E;
+    --moss: #4C7A3D;
+    --moss-dark: #395C2D;
+    --ochre: #B5651D;
+    --line: #E4E0D2;
+    --line-strong: #C9C4AF;
+    --c-muitobaixo: #D73027;
+    --c-baixo: #FC8D59;
+    --c-medio: #E9C845;
+    --c-alto: #91CF60;
+    --c-muitoalto: #1A9850;
+    --radius: 10px;
+    --shadow: 0 1px 2px rgba(35,41,31,0.06), 0 4px 16px rgba(35,41,31,0.05);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:'IBM Plex Sans', sans-serif;
+    font-size:14px;
+    -webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3,.display{
+    font-family:'Space Grotesk', sans-serif;
+    letter-spacing:-0.01em;
+  }
+  .mono{ font-family:'IBM Plex Mono', monospace; }
+
+  /* ---------- layout shell ---------- */
+  #shell{ display:flex; min-height:100vh; }
+  #sidebar{
+    width:230px; flex:0 0 230px;
+    background:var(--sidebar); color:var(--sidebar-ink);
+    display:flex; flex-direction:column;
+    padding:20px 0 16px;
+    position:sticky; top:0; height:100vh;
+  }
+  .brand{ padding:0 20px 18px; border-bottom:1px solid #3A4130; margin-bottom:10px;}
+  .brand .k{ font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:17px; color:#fff; letter-spacing:-0.01em;}
+  .brand .sub{ font-size:11px; color:var(--sidebar-ink-dim); margin-top:3px; text-transform:uppercase; letter-spacing:.06em;}
+  nav{ flex:1; overflow-y:auto; padding:6px 10px;}
+  .nav-group{ margin:14px 8px 4px; font-size:10.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--sidebar-ink-dim); }
+  .nav-btn{
+    display:flex; align-items:center; gap:10px;
+    width:100%; text-align:left; background:none; border:none; cursor:pointer;
+    color:var(--sidebar-ink); font-family:'IBM Plex Sans',sans-serif; font-size:13.5px;
+    padding:9px 12px; border-radius:8px; margin-bottom:2px;
+  }
+  .nav-btn .dot{ width:6px;height:6px;border-radius:50%;background:#5C6350; flex:0 0 auto;}
+  .nav-btn:hover{ background:#2E3524; }
+  .nav-btn.active{ background:var(--moss); color:#fff; }
+  .nav-btn.active .dot{ background:#fff; }
+  .sidebar-foot{ padding:12px 20px 0; border-top:1px solid #3A4130; font-size:11px; color:var(--sidebar-ink-dim); line-height:1.5;}
+
+  #main{ flex:1; min-width:0; padding:26px 34px 60px; max-width:1180px; }
+  .topbar{ display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:22px; flex-wrap:wrap; gap:12px;}
+  .topbar h1{ font-size:22px; margin:0 0 4px; }
+  .topbar .desc{ color:var(--ink-soft); font-size:13px; max-width:640px; }
+  .context-pill{
+    display:flex; gap:18px; background:var(--panel); border:1px solid var(--line);
+    border-radius:999px; padding:8px 18px; box-shadow:var(--shadow); font-size:12px;
+  }
+  .context-pill div{ text-align:center; }
+  .context-pill b{ display:block; font-family:'Space Grotesk',sans-serif; font-size:14px; }
+  .context-pill span{ color:var(--ink-soft); font-size:10.5px; text-transform:uppercase; letter-spacing:.05em;}
+
+  .panel{ display:none; }
+  .panel.active{ display:block; animation:fade .25s ease; }
+  @keyframes fade{ from{opacity:0; transform:translateY(3px);} to{opacity:1; transform:none;} }
+
+  .grid{ display:grid; gap:16px; }
+  .grid.cols-2{ grid-template-columns: 1fr 1fr; }
+  .grid.cols-3{ grid-template-columns: repeat(3,1fr); }
+  .grid.map-layout{ grid-template-columns: 1.05fr 0.95fr; align-items:start; }
+  @media (max-width:900px){
+    .grid.cols-2,.grid.cols-3,.grid.map-layout{ grid-template-columns:1fr; }
+    #shell{ flex-direction:column; }
+    #sidebar{ width:100%; flex:none; height:auto; position:sticky; top:0; z-index:40; padding:14px 0 10px; }
+    .brand{ padding:0 16px 12px; margin-bottom:8px; }
+    nav{ display:flex; overflow-x:auto; padding:0 12px 4px; gap:6px; -webkit-overflow-scrolling:touch; }
+    .nav-group{ display:none; }
+    .nav-btn{ white-space:nowrap; width:auto; margin-bottom:0; }
+    .sidebar-foot{ display:none; }
+    #main{ padding:20px 16px 40px; }
+  }
+
+  .card{
+    background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+    padding:18px 20px; box-shadow:var(--shadow);
+  }
+  .card h3{ font-size:14px; margin:0 0 12px; display:flex; align-items:center; justify-content:space-between; }
+  .card h3 .tag{ font-size:10px; font-weight:500; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-soft); font-family:'IBM Plex Sans',sans-serif;}
+  .metric{ font-family:'Space Grotesk',sans-serif; font-size:26px; font-weight:600; }
+  .metric-label{ font-size:11.5px; color:var(--ink-soft); margin-top:2px; }
+
+  table{ width:100%; border-collapse:collapse; font-size:12.5px; }
+  th{ text-align:left; font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-soft); padding:6px 8px; border-bottom:1px solid var(--line-strong); font-weight:600;}
+  td{ padding:6px 8px; border-bottom:1px solid var(--line); }
+  tr:last-child td{ border-bottom:none; }
+  td.num, th.num{ text-align:right; font-family:'IBM Plex Mono',monospace; }
+
+  .badge{ display:inline-block; padding:2px 9px; border-radius:999px; font-size:10.5px; font-weight:600; color:#20261A; }
+  .badge.MuitoBaixo{ background:var(--c-muitobaixo); color:#fff;}
+  .badge.Baixo{ background:var(--c-baixo); color:#3a2200;}
+  .badge.Medio{ background:var(--c-medio); color:#3a2200;}
+  .badge.Alto{ background:var(--c-alto); color:#123008;}
+  .badge.MuitoAlto{ background:var(--c-muitoalto); color:#fff;}
+
+  label{ font-size:11.5px; color:var(--ink-soft); display:block; margin-bottom:4px; text-transform:uppercase; letter-spacing:.03em;}
+  select, input[type=number], input[type=text]{
+    width:100%; padding:8px 10px; border-radius:7px; border:1px solid var(--line-strong);
+    font-family:'IBM Plex Mono',monospace; font-size:13px; background:#FCFBF7; color:var(--ink);
+  }
+  .field{ margin-bottom:12px; }
+  .row{ display:flex; gap:12px; }
+  .row > *{ flex:1; }
+  .btn{
+    background:var(--moss); color:#fff; border:none; padding:9px 16px; border-radius:7px;
+    font-family:'IBM Plex Sans',sans-serif; font-weight:600; font-size:13px; cursor:pointer;
+  }
+  .btn:hover{ background:var(--moss-dark); }
+  .btn.ghost{ background:none; border:1px solid var(--line-strong); color:var(--ink); }
+  .btn.ghost:hover{ background:#F0EEE3; }
+  .note{ background:#FBF2E3; border:1px solid #E9D2A4; color:#7A5308; border-radius:8px; padding:10px 13px; font-size:12px; line-height:1.5; }
+  .note.soft{ background:#F1F4EC; border-color:#D5E0C6; color:#3E5230; }
+  .hint{ font-size:11.5px; color:var(--ink-soft); margin-top:4px; line-height:1.5;}
+  .flexbetween{ display:flex; justify-content:space-between; align-items:center; }
+  .legend-row{ display:flex; align-items:center; gap:6px; font-size:12px; }
+  .swatch{ width:12px; height:12px; border-radius:3px; display:inline-block; border:1px solid rgba(0,0,0,.15); }
+  .tabs-sub{ display:flex; gap:6px; margin-bottom:14px; flex-wrap:wrap; }
+  .tabs-sub button{
+    background:#EFEDE1; border:1px solid var(--line-strong); padding:6px 12px; border-radius:7px;
+    font-size:12px; cursor:pointer; font-family:'IBM Plex Sans',sans-serif; color:var(--ink-soft);
+  }
+  .tabs-sub button.active{ background:var(--ink); color:#fff; border-color:var(--ink); }
+
+  #zoneTooltip{
+    position:absolute; pointer-events:none; background:var(--ink); color:#fff; font-size:11.5px;
+    padding:6px 10px; border-radius:6px; display:none; z-index:50; font-family:'IBM Plex Mono',monospace;
+    box-shadow:var(--shadow); white-space:nowrap;
+  }
+  svg.fieldmap{ width:100%; height:auto; display:block; }
+  .zone-path{ stroke:#ffffff; stroke-width:2; cursor:pointer; transition:opacity .15s; }
+  .zone-path:hover{ opacity:.82; }
+  .field-outline{ fill:none; stroke:var(--ink); stroke-width:3; }
+  .pt-dot{ fill:#fff; stroke:var(--ink); stroke-width:1.5; }
+  .pt-label{ font-family:'IBM Plex Mono',monospace; font-size:16px; fill:var(--ink); }
+  footer.credit{ margin-top:34px; font-size:11px; color:var(--ink-soft); border-top:1px solid var(--line); padding-top:14px; }
+</style>
+</head>
+<body>
+
+<div id="shell">
+  <aside id="sidebar">
+    <div class="brand">
+      <div class="k">◆ Talhão</div>
+      <div class="sub">Agricultura de Precisão</div>
+    </div>
+    <nav id="navList"></nav>
+    <div class="sidebar-foot">Protótipo funcional · dados reais do talhão GraxaimFrente · 11 amostras</div>
+  </aside>
+
+  <main id="main">
+    <div class="topbar">
+      <div>
+        <h1 id="pageTitle">Visão Geral</h1>
+        <div class="desc" id="pageDesc">Painel do talhão.</div>
+      </div>
+      <div class="context-pill" id="contextPill"></div>
+    </div>
+
+    <div id="panels"></div>
+
+    <footer class="credit">Protótipo de agricultura de precisão gerado a partir dos dados enviados (GraxaimFrente / Agropecuária Michelon). Fórmulas de calagem e NPK são metodologias-padrão configuráveis — ajuste os parâmetros conforme o manual de recomendação da sua região/laboratório antes de qualquer aplicação em campo.</footer>
+  </main>
+</div>
+<div id="zoneTooltip"></div>
+
+<script>
+/* ================= CONFIG DA API ================= */
+// Aponta para o backend FastAPI (ver pacote backend_agricultura_precisao.zip).
+// Rodando local com docker-compose/uvicorn, o padrão já funciona sem alterar nada.
+const API_BASE = window.API_BASE || "https://ap-agro.onrender.com";
+const TALHAO_ID_INICIAL = window.TALHAO_ID || null; // se null, usa o primeiro talhão cadastrado
+
+let DATA = null;
+let GEO = null;
+let CURRENT_TALHAO_ID = null;
+let CURRENT_SAFRA_ID = null;
+let TALHOES_LIST = [];
+let SAFRAS_LIST = [];
+
+async function resolveTalhaoId() {
+  if (TALHAO_ID_INICIAL) return TALHAO_ID_INICIAL;
+  const resp = await fetch(`${API_BASE}/talhoes/_first`);
+  if (!resp.ok) throw new Error("Nenhum talhão encontrado — rode o seed.py do backend, ou cadastre um talhão na aba Cadastro.");
+  return (await resp.json()).id;
+}
+
+async function loadTalhoesList() {
+  const resp = await fetch(`${API_BASE}/talhoes`);
+  TALHOES_LIST = resp.ok ? await resp.json() : [];
+}
+
+async function loadSafrasList(talhaoId) {
+  const resp = await fetch(`${API_BASE}/talhoes/${talhaoId}/safras`);
+  SAFRAS_LIST = resp.ok ? await resp.json() : [];
+}
+
+async function loadData(talhaoId, safraId) {
+  const qs = safraId ? `?safra_id=${safraId}` : '';
+  const resp = await fetch(`${API_BASE}/talhoes/${talhaoId}/app${qs}`);
+  if (!resp.ok) throw new Error(`API respondeu ${resp.status}`);
+  const payload = await resp.json();
+  DATA = { talhao: payload.talhao, samples: payload.samples, elements_meta: payload.elements_meta };
+  GEO = payload.geo;
+  CURRENT_TALHAO_ID = talhaoId;
+  ELEMENT_LIST = Object.keys(DATA.elements_meta);
+  if (!ELEMENT_LIST.includes(state.mapElement)) state.mapElement = ELEMENT_LIST[0] || null;
+  await loadSafrasList(talhaoId);
+  if (!safraId && SAFRAS_LIST.length) CURRENT_SAFRA_ID = SAFRAS_LIST[0].id;
+  else CURRENT_SAFRA_ID = safraId || null;
+}
+
+async function switchTalhao(talhaoId) {
+  await loadData(talhaoId, null);
+  renderContext();
+  setTab(state.tab);
+}
+
+async function switchSafra(safraId) {
+  await loadData(CURRENT_TALHAO_ID, safraId);
+  renderContext();
+  setTab(state.tab);
+}
+
+
+const CLASS_COLORS = {
+  'Muito Baixo':'var(--c-muitobaixo)','Baixo':'var(--c-baixo)','Médio':'var(--c-medio)',
+  'Alto':'var(--c-alto)','Muito Alto':'var(--c-muitoalto)'
+};
+const CLASS_HEX = {
+  'Muito Baixo':'#D73027','Baixo':'#FC8D59','Médio':'#E9C845','Alto':'#91CF60','Muito Alto':'#1A9850'
+};
+const CLASS_ORDER = ['Muito Baixo','Baixo','Médio','Alto','Muito Alto'];
+const badgeClass = c => c ? c.replace(/\s/g,'') : '';
+
+let ELEMENT_LIST = [];
+const orderIdx = () => DATA.samples.map((s,i)=>i).sort((a,b)=>(parseInt(DATA.samples[a].id)||0)-(parseInt(DATA.samples[b].id)||0));
+const sortedSamples = () => orderIdx().map(i=>DATA.samples[i]);
+
+/* Fertilizer DB (composições públicas / padrão de mercado — editável) */
+let FERT_DB = [
+  {nome:'Ureia',        N:45, P2O5:0,  K2O:0,  S:0},
+  {nome:'MAP (11-52-00)', N:11, P2O5:52, K2O:0, S:1},
+  {nome:'DAP (18-46-00)', N:18, P2O5:46, K2O:0, S:0},
+  {nome:'Superfosfato Simples (SSP)', N:0, P2O5:18, K2O:0, S:12},
+  {nome:'Superfosfato Triplo (TSP)',  N:0, P2O5:41, K2O:0, S:1},
+  {nome:'Cloreto de Potássio (KCl)',  N:0, P2O5:0,  K2O:60, S:0},
+  {nome:'Sulfato de Amônio',          N:21, P2O5:0, K2O:0, S:24},
+  {nome:'NPK 05-20-20',               N:5, P2O5:20, K2O:20, S:0},
+];
+
+/* Default dose-by-class tables (kg/ha nutriente) — valores ILUSTRATIVOS, editáveis na UI */
+let DOSE_TABLE = {
+  'Fósforo (Resina)': {label:'P₂O₅ (kg/ha)', 'Muito Baixo':110,'Baixo':80,'Médio':50,'Alto':25,'Muito Alto':0},
+  'Potássio (Resina)': {label:'K₂O (kg/ha)', 'Muito Baixo':100,'Baixo':70,'Médio':45,'Alto':20,'Muito Alto':0},
+};
+
+/* ================= NAV ================= */
+const SECTIONS = [
+  {group:'Visão', items:[
+    {id:'dashboard', label:'Dashboard'},
+  ]},
+  {group:'Fertilidade', items:[
+    {id:'mapa', label:'Mapa de Fertilidade'},
+  ]},
+  {group:'Recomendações', items:[
+    {id:'calagem', label:'Calagem'},
+    {id:'npk', label:'NPK (P e K)'},
+    {id:'fertilizantes', label:'Conversão p/ Fertilizante'},
+  ]},
+  {group:'Prescrição', items:[
+    {id:'taxavariavel', label:'Taxa Variável'},
+    {id:'economico', label:'Simulação Econômica'},
+    {id:'exportacao', label:'Exportação'},
+  ]},
+  {group:'Propriedades', items:[
+    {id:'cadastro', label:'Cadastro'},
+    {id:'safras', label:'Comparar Safras'},
+  ]},
+];
+
+let state = {
+  tab: 'dashboard',
+  mapElement: 'Fósforo (Resina)',
+  calagem: {v2:70, prnt:90, prof:20},
+  npkNutriente: 'Fósforo (Resina)',
+  fertP: 'MAP (11-52-00)',
+  fertK: 'Cloreto de Potássio (KCl)',
+  tv: {min:0, max:9999, step:5, fonte:'npk_p'},
+  eco: {precoP: 6.8, precoK: 4.6, precoCal: 0.32},
+};
+
+function navHtml(){
+  return SECTIONS.map(sec => `
+    <div class="nav-group">${sec.group}</div>
+    ${sec.items.map(it => `<button class="nav-btn ${it.id===state.tab?'active':''}" data-tab="${it.id}"><span class="dot"></span>${it.label}</button>`).join('')}
+  `).join('');
+}
+
+const TITLES = {
+  dashboard:['Dashboard','Panorama geral do talhão e da amostragem.'],
+  mapa:['Mapa de Fertilidade','Classificação por zona (Voronoi) segundo a tabela de referência carregada.'],
+  calagem:['Recomendação de Calagem','Método da saturação por bases (V%), ajustado por PRNT e profundidade.'],
+  npk:['Recomendação de NPK','Dose por classe de fertilidade — tabela configurável.'],
+  fertilizantes:['Conversão para Fertilizante','Converte a necessidade de nutriente em kg/ha de produto comercial.'],
+  taxavariavel:['Prescrição em Taxa Variável','Mapa de aplicação por zona, pronto para exportação.'],
+  economico:['Simulação Econômica','Aplicação uniforme × taxa variável.'],
+  exportacao:['Exportação','Gerar arquivos de prescrição (CSV / GeoJSON).'],
+  cadastro:['Cadastro','Propriedades, fazendas, talhões, safras e importação de amostras.'],
+  safras:['Comparar Safras','Evolução de um atributo entre duas safras do mesmo talhão.'],
+};
+
+function setTab(tab){
+  state.tab = tab;
+  document.getElementById('navList').innerHTML = navHtml();
+  document.getElementById('pageTitle').textContent = TITLES[tab][0];
+  document.getElementById('pageDesc').textContent = TITLES[tab][1];
+  document.querySelectorAll('.nav-btn').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+  renderPanel();
+}
+
+/* ================= HELPERS ================= */
+function fmt(n, d=1){ return (n===null||n===undefined||isNaN(n)) ? '—' : n.toLocaleString('pt-BR',{minimumFractionDigits:d,maximumFractionDigits:d}); }
+function sampleClass(s, elem){ return s.values[elem] ? s.values[elem].classe : null; }
+function sampleValue(s, elem){ return s.values[elem] ? s.values[elem].v : null; }
+
+/* ---- SVG field map, generic: color function per sample -> hex, label function -> string ---- */
+function renderFieldMap(colorFn, opts={}){
+  const vb = GEO.viewBox;
+  let svg = `<svg class="fieldmap" viewBox="${vb.join(' ')}" xmlns="http://www.w3.org/2000/svg">`;
+  GEO.zones.forEach((zpts,i)=>{
+    if(!zpts) return;
+    const s = DATA.samples[i];
+    const color = colorFn(s,i) || '#EDEAE0';
+    const d = 'M ' + zpts.map(p=>p.join(',')).join(' L ') + ' Z';
+    svg += `<path class="zone-path" d="${d}" fill="${color}" data-idx="${i}"></path>`;
+  });
+  svg += `<path class="field-outline" d="M ${GEO.field.map(p=>p.join(',')).join(' L ')} Z"></path>`;
+  GEO.points.forEach((p,i)=>{
+    svg += `<circle class="pt-dot" cx="${p[0]}" cy="${p[1]}" r="10"></circle>`;
+    svg += `<text class="pt-label" x="${p[0]+13}" y="${p[1]+5}">${DATA.samples[i].id}</text>`;
+  });
+  svg += `</svg>`;
+  return svg;
+}
+
+function attachMapEvents(container, tooltipFn){
+  const tip = document.getElementById('zoneTooltip');
+  container.querySelectorAll('.zone-path').forEach(el=>{
+    el.addEventListener('mousemove', e=>{
+      const idx = +el.dataset.idx;
+      tip.style.display='block';
+      tip.style.left = (e.pageX+14)+'px';
+      tip.style.top = (e.pageY+10)+'px';
+      tip.innerHTML = tooltipFn(DATA.samples[idx]);
+    });
+    el.addEventListener('mouseleave', ()=> tip.style.display='none');
+  });
+}
+
+function legendRow(labels){
+  return `<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;">${
+    labels.map(c=>`<span class="legend-row"><span class="swatch" style="background:${CLASS_HEX[c]}"></span>${c}</span>`).join('')
+  }</div>`;
+}
+
+/* ================= PANEL: DASHBOARD ================= */
+function panelDashboard(){
+  const n = DATA.samples.length;
+  const avgArea = DATA.talhao.area_ha / n;
+  const classCounts = {};
+  ELEMENT_LIST.forEach(e=>{ classCounts[e]={}; CLASS_ORDER.forEach(c=>classCounts[e][c]=0);
+    DATA.samples.forEach(s=>{ const c=sampleClass(s,e); if(c) classCounts[e][c]++; }); });
+
+  const lowPriority = ELEMENT_LIST.map(e=>{
+    const low = (classCounts[e]['Muito Baixo']||0)+(classCounts[e]['Baixo']||0);
+    return {e, low, pct: low/n*100};
+  }).sort((a,b)=>b.pct-a.pct).slice(0,5);
+
+  return `
+  <div class="grid cols-3" style="margin-bottom:16px;">
+    <div class="card"><h3>Área do talhão</h3><div class="metric">${fmt(DATA.talhao.area_ha,2)} ha</div><div class="metric-label">${DATA.talhao.fazenda} · ${DATA.talhao.nome}</div></div>
+    <div class="card"><h3>Amostras</h3><div class="metric">${n}</div><div class="metric-label">densidade média de 1 ponto / ${fmt(avgArea,1)} ha</div></div>
+    <div class="card"><h3>Atributos avaliados</h3><div class="metric">${ELEMENT_LIST.length}</div><div class="metric-label">classificados pela tabela de referência</div></div>
+  </div>
+  <div class="grid cols-2">
+    <div class="card">
+      <h3>Prioridades de correção <span class="tag">% amostras Baixo/Muito Baixo</span></h3>
+      <table><thead><tr><th>Elemento</th><th class="num">% do talhão</th></tr></thead><tbody>
+        ${lowPriority.map(r=>`<tr><td>${r.e}</td><td class="num">${fmt(r.pct,0)}%</td></tr>`).join('')}
+      </tbody></table>
+      <div class="hint">Baseado na classificação por zona de influência (Voronoi) de cada amostra.</div>
+    </div>
+    <div class="card">
+      <h3>Mapa rápido <span class="tag">Fósforo</span></h3>
+      <div id="dashMap"></div>
+    </div>
+  </div>`;
+}
+function afterDashboard(){
+  const el = document.getElementById('dashMap');
+  el.innerHTML = renderFieldMap((s)=> CLASS_HEX[sampleClass(s,'Fósforo (Resina)')]);
+  attachMapEvents(el, s=>`P${s.id}: ${fmt(sampleValue(s,'Fósforo (Resina)'),1)} mg/dm³ · ${sampleClass(s,'Fósforo (Resina)')}`);
+}
+
+/* ================= PANEL: MAPA DE FERTILIDADE ================= */
+function panelMapa(){
+  return `
+  <div class="grid map-layout">
+    <div class="card">
+      <h3>${state.mapElement} <span class="tag">${DATA.elements_meta[state.mapElement].unidade}</span></h3>
+      <div id="mapaMap"></div>
+      ${legendRow(CLASS_ORDER)}
+    </div>
+    <div class="card">
+      <h3>Selecionar atributo</h3>
+      <div class="field">
+        <label>Elemento</label>
+        <select id="mapElemSelect">
+          ${ELEMENT_LIST.map(e=>`<option value="${e}" ${e===state.mapElement?'selected':''}>${e}</option>`).join('')}
+        </select>
+      </div>
+      <table>
+        <thead><tr><th>Amostra</th><th class="num">Valor</th><th>Classe</th></tr></thead>
+        <tbody>
+        ${sortedSamples().map(s=>`<tr><td>#${s.id}</td><td class="num">${fmt(sampleValue(s,state.mapElement),2)}</td><td><span class="badge ${badgeClass(sampleClass(s,state.mapElement))}">${sampleClass(s,state.mapElement)||'—'}</span></td></tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  </div>`;
+}
+function afterMapa(){
+  const el = document.getElementById('mapaMap');
+  el.innerHTML = renderFieldMap((s)=> CLASS_HEX[sampleClass(s,state.mapElement)]);
+  attachMapEvents(el, s=>`#${s.id}: ${fmt(sampleValue(s,state.mapElement),2)} ${DATA.elements_meta[state.mapElement].unidade} · ${sampleClass(s,state.mapElement)}`);
+  document.getElementById('mapElemSelect').onchange = e=>{ state.mapElement=e.target.value; renderPanel(); };
+}
+
+/* ================= PANEL: CALAGEM ================= */
+function calagemDose(s){
+  const v1 = sampleValue(s,'Saturação por bases');
+  const ctc = sampleValue(s,'Capac. de troca de cátions');
+  if(v1===null||ctc===null) return null;
+  const {v2, prnt, prof} = state.calagem;
+  let nc = (v2 - v1) * ctc / 100;   // t/ha a PRNT 100%, 20cm
+  nc = nc * (100/prnt) * (prof/20);
+  return Math.max(0, nc);
+}
+function panelCalagem(){
+  return `
+  <div class="grid map-layout">
+    <div class="card">
+      <h3>Mapa de necessidade de calcário <span class="tag">t/ha</span></h3>
+      <div id="calMap"></div>
+      <div class="hint">Verde = sem necessidade adicional · Vermelho = maior demanda de correção.</div>
+    </div>
+    <div class="card">
+      <h3>Parâmetros do método (V%)</h3>
+      <div class="field"><label>Saturação por bases alvo — V2 (%)</label><input type="number" id="calV2" value="${state.calagem.v2}"></div>
+      <div class="field"><label>PRNT do calcário (%)</label><input type="number" id="calPRNT" value="${state.calagem.prnt}"></div>
+      <div class="field"><label>Profundidade de incorporação (cm)</label><input type="number" id="calProf" value="${state.calagem.prof}"></div>
+      <div class="note">Fórmula: NC (t/ha) = (V2 − V1) × CTC / 100 × (100/PRNT) × (profundidade/20). V1 e CTC vêm da amostra de cada zona.</div>
+      <table style="margin-top:12px;">
+        <thead><tr><th>Zona</th><th class="num">V1 atual</th><th class="num">CTC</th><th class="num">Dose (t/ha)</th><th class="num">Área (ha)</th><th class="num">Total (t)</th></tr></thead>
+        <tbody id="calTableBody"></tbody>
+        <tfoot><tr style="font-weight:600;"><td colspan="5">Total de calcário no talhão</td><td class="num" id="calTotalT"></td></tr></tfoot>
+      </table>
+    </div>
+  </div>`;
+}
+function afterCalagem(){
+  ['calV2','calPRNT','calProf'].forEach((id,i)=>{
+    document.getElementById(id).oninput = e=>{
+      const keys=['v2','prnt','prof'];
+      state.calagem[keys[i]] = parseFloat(e.target.value)||0;
+      renderPanel();
+    };
+  });
+  const doses = DATA.samples.map(s=>calagemDose(s));
+  const max = Math.max(...doses.filter(d=>d!==null), 0.01);
+  const el = document.getElementById('calMap');
+  el.innerHTML = renderFieldMap((s,i)=>{
+    const d = doses[i]; if(d===null) return '#EDEAE0';
+    const t = d/max;
+    return t<0.15? CLASS_HEX['Muito Alto'] : t<0.4? CLASS_HEX['Alto'] : t<0.65? CLASS_HEX['Médio'] : t<0.85? CLASS_HEX['Baixo'] : CLASS_HEX['Muito Baixo'];
+  });
+  attachMapEvents(el, s=>{ const i=DATA.samples.indexOf(s); return `#${s.id}: ${fmt(doses[i],2)} t/ha`; });
+
+  let totalT = 0;
+  document.getElementById('calTableBody').innerHTML = orderIdx().map(i=>{
+    const s = DATA.samples[i];
+    const d = doses[i]; const tot = d!==null? d*s.area_ha : 0; totalT += tot;
+    return `<tr><td>#${s.id}</td><td class="num">${fmt(sampleValue(s,'Saturação por bases'),1)}%</td><td class="num">${fmt(sampleValue(s,'Capac. de troca de cátions'),1)}</td><td class="num">${d!==null?fmt(d,2):'—'}</td><td class="num">${fmt(s.area_ha,2)}</td><td class="num">${fmt(tot,2)}</td></tr>`;
+  }).join('');
+  document.getElementById('calTotalT').textContent = fmt(totalT,1)+' t';
+}
+
+/* ================= PANEL: NPK ================= */
+function npkDose(s, nutriente){
+  const c = sampleClass(s, nutriente);
+  if(!c) return null;
+  return DOSE_TABLE[nutriente][c];
+}
+function panelNpk(){
+  const nut = state.npkNutriente;
+  const table = DOSE_TABLE[nut];
+  return `
+  <div class="grid map-layout">
+    <div class="card">
+      <h3>Mapa de dose recomendada <span class="tag">${table.label}</span></h3>
+      <div id="npkMap"></div>
+      <div class="hint">Verde = sem necessidade (classe Alto/Muito Alto) · Vermelho = maior dose (classe Muito Baixo).</div>
+    </div>
+    <div class="card">
+      <h3>Nutriente e tabela de doses</h3>
+      <div class="field">
+        <label>Nutriente</label>
+        <select id="npkNutSelect">
+          <option value="Fósforo (Resina)" ${nut==='Fósforo (Resina)'?'selected':''}>Fósforo (P)</option>
+          <option value="Potássio (Resina)" ${nut==='Potássio (Resina)'?'selected':''}>Potássio (K)</option>
+        </select>
+      </div>
+      <div class="note">Tabela de doses por classe — <b>valores ilustrativos, editáveis</b>. Ajuste conforme o manual de recomendação regional (ex.: CQFS RS/SC) antes de usar.</div>
+      <table style="margin-top:10px;">
+        <thead><tr><th>Classe</th><th class="num">${table.label}</th></tr></thead>
+        <tbody>
+        ${CLASS_ORDER.map(c=>`<tr><td><span class="badge ${badgeClass(c)}">${c}</span></td><td class="num"><input type="number" style="width:90px;text-align:right;" data-class="${c}" class="npkDoseInput" value="${table[c]}"></td></tr>`).join('')}
+        </tbody>
+      </table>
+      <table style="margin-top:14px;">
+        <thead><tr><th>Zona</th><th>Classe</th><th class="num">Dose (kg/ha)</th></tr></thead>
+        <tbody id="npkTableBody"></tbody>
+      </table>
+    </div>
+  </div>`;
+}
+function afterNpk(){
+  document.getElementById('npkNutSelect').onchange = e=>{ state.npkNutriente = e.target.value; renderPanel(); };
+  document.querySelectorAll('.npkDoseInput').forEach(inp=>{
+    inp.oninput = e=>{ DOSE_TABLE[state.npkNutriente][inp.dataset.class] = parseFloat(e.target.value)||0; renderPanel(); };
+  });
+  const nut = state.npkNutriente;
+  const el = document.getElementById('npkMap');
+  el.innerHTML = renderFieldMap((s)=>{
+    const c = sampleClass(s,nut);
+    return c? CLASS_HEX[c] : '#EDEAE0';
+  });
+  attachMapEvents(el, s=>`#${s.id}: ${sampleClass(s,nut)} → ${fmt(npkDose(s,nut),0)} kg/ha`);
+  document.getElementById('npkTableBody').innerHTML = sortedSamples().map(s=>{
+    const c = sampleClass(s,nut);
+    return `<tr><td>#${s.id}</td><td><span class="badge ${badgeClass(c)}">${c||'—'}</span></td><td class="num">${fmt(npkDose(s,nut),0)}</td></tr>`;
+  }).join('');
+}
+
+/* ================= PANEL: FERTILIZANTES ================= */
+function fertRow(nome){ return FERT_DB.find(f=>f.nome===nome); }
+function panelFertilizantes(){
+  return `
+  <div class="grid cols-2">
+    <div class="card">
+      <h3>Fonte de Fósforo</h3>
+      <div class="field"><label>Produto</label>
+        <select id="fertPSel">${FERT_DB.map(f=>`<option ${f.nome===state.fertP?'selected':''}>${f.nome}</option>`).join('')}</select>
+      </div>
+      <table><thead><tr><th>Garantia</th><th class="num">%</th></tr></thead><tbody id="fertPInfo"></tbody></table>
+      <table style="margin-top:12px;"><thead><tr><th>Zona</th><th class="num">Necessidade P₂O₅</th><th class="num">Dose produto (kg/ha)</th></tr></thead><tbody id="fertPTable"></tbody></table>
+    </div>
+    <div class="card">
+      <h3>Fonte de Potássio</h3>
+      <div class="field"><label>Produto</label>
+        <select id="fertKSel">${FERT_DB.map(f=>`<option ${f.nome===state.fertK?'selected':''}>${f.nome}</option>`).join('')}</select>
+      </div>
+      <table><thead><tr><th>Garantia</th><th class="num">%</th></tr></thead><tbody id="fertKInfo"></tbody></table>
+      <table style="margin-top:12px;"><thead><tr><th>Zona</th><th class="num">Necessidade K₂O</th><th class="num">Dose produto (kg/ha)</th></tr></thead><tbody id="fertKTable"></tbody></table>
+    </div>
+  </div>
+  <div class="note" style="margin-top:14px;">Composições da base de fertilizantes são valores padrão de mercado — edite em código se seus produtos tiverem garantias diferentes.</div>
+  `;
+}
+function fertInfoRows(f){
+  return `<tr><td>N</td><td class="num">${f.N}</td></tr><tr><td>P₂O₅</td><td class="num">${f.P2O5}</td></tr><tr><td>K₂O</td><td class="num">${f.K2O}</td></tr><tr><td>S</td><td class="num">${f.S}</td></tr>`;
+}
+function afterFertilizantes(){
+  document.getElementById('fertPSel').onchange = e=>{ state.fertP=e.target.value; renderPanel(); };
+  document.getElementById('fertKSel').onchange = e=>{ state.fertK=e.target.value; renderPanel(); };
+  const fp = fertRow(state.fertP), fk = fertRow(state.fertK);
+  document.getElementById('fertPInfo').innerHTML = fertInfoRows(fp);
+  document.getElementById('fertKInfo').innerHTML = fertInfoRows(fk);
+  document.getElementById('fertPTable').innerHTML = sortedSamples().map(s=>{
+    const need = npkDose(s,'Fósforo (Resina)');
+    const dose = fp.P2O5>0 ? need/(fp.P2O5/100) : null;
+    return `<tr><td>#${s.id}</td><td class="num">${fmt(need,0)}</td><td class="num">${dose!==null?fmt(dose,0):'—'}</td></tr>`;
+  }).join('');
+  document.getElementById('fertKTable').innerHTML = sortedSamples().map(s=>{
+    const need = npkDose(s,'Potássio (Resina)');
+    const dose = fk.K2O>0 ? need/(fk.K2O/100) : null;
+    return `<tr><td>#${s.id}</td><td class="num">${fmt(need,0)}</td><td class="num">${dose!==null?fmt(dose,0):'—'}</td></tr>`;
+  }).join('');
+}
+
+/* ================= PANEL: TAXA VARIÁVEL ================= */
+function tvDoseFor(s){
+  switch(state.tv.fonte){
+    case 'npk_p': { const fp=fertRow(state.fertP); const need=npkDose(s,'Fósforo (Resina)'); return fp.P2O5>0? need/(fp.P2O5/100): 0; }
+    case 'npk_k': { const fk=fertRow(state.fertK); const need=npkDose(s,'Potássio (Resina)'); return fk.K2O>0? need/(fk.K2O/100): 0; }
+    case 'calagem': { const d = calagemDose(s); return (d||0)*1000; } // t/ha -> kg/ha for consistent unit
+    default: return 0;
+  }
+}
+function tvClamp(dose){
+  const {min,max,step} = state.tv;
+  let d = Math.max(min, Math.min(max, dose));
+  if(step>0) d = Math.round(d/step)*step;
+  return d;
+}
+function panelTaxaVariavel(){
+  return `
+  <div class="grid map-layout">
+    <div class="card">
+      <h3>Mapa de prescrição <span class="tag" id="tvUnitTag">kg/ha</span></h3>
+      <div id="tvMap"></div>
+      <div class="hint">Zonas correspondem à área de influência (Voronoi) de cada ponto amostral, recortada no limite do talhão.</div>
+    </div>
+    <div class="card">
+      <h3>Configuração da prescrição</h3>
+      <div class="field"><label>Fonte da dose</label>
+        <select id="tvFonteSel">
+          <option value="npk_p" ${state.tv.fonte==='npk_p'?'selected':''}>Fertilizante fosfatado (${state.fertP})</option>
+          <option value="npk_k" ${state.tv.fonte==='npk_k'?'selected':''}>Fertilizante potássico (${state.fertK})</option>
+          <option value="calagem" ${state.tv.fonte==='calagem'?'selected':''}>Calcário (kg/ha)</option>
+        </select>
+      </div>
+      <div class="row">
+        <div class="field"><label>Dose mínima (kg/ha)</label><input type="number" id="tvMin" value="${state.tv.min}"></div>
+        <div class="field"><label>Dose máxima (kg/ha)</label><input type="number" id="tvMax" value="${state.tv.max}"></div>
+      </div>
+      <div class="field"><label>Arredondar em passos de (kg/ha)</label><input type="number" id="tvStep" value="${state.tv.step}"></div>
+      <table style="margin-top:10px;">
+        <thead><tr><th>Zona</th><th class="num">Área (ha)</th><th class="num">Dose (kg/ha)</th><th class="num">Total (kg)</th></tr></thead>
+        <tbody id="tvTableBody"></tbody>
+        <tfoot><tr style="font-weight:600;"><td>Total</td><td class="num" id="tvTotalArea"></td><td class="num" id="tvDoseMedia"></td><td class="num" id="tvTotalKg"></td></tr></tfoot>
+      </table>
+    </div>
+  </div>`;
+}
+function afterTaxaVariavel(){
+  document.getElementById('tvFonteSel').onchange = e=>{ state.tv.fonte=e.target.value; renderPanel(); };
+  document.getElementById('tvMin').oninput = e=>{ state.tv.min=parseFloat(e.target.value)||0; renderPanel(); };
+  document.getElementById('tvMax').oninput = e=>{ state.tv.max=parseFloat(e.target.value)||99999; renderPanel(); };
+  document.getElementById('tvStep').oninput = e=>{ state.tv.step=parseFloat(e.target.value)||1; renderPanel(); };
+
+  const doses = DATA.samples.map(s=>tvClamp(tvDoseFor(s)));
+  const max = Math.max(...doses, 0.01), min = Math.min(...doses);
+  const el = document.getElementById('tvMap');
+  el.innerHTML = renderFieldMap((s,i)=>{
+    const t = max>min? (doses[i]-min)/(max-min) : 0.5;
+    return t<0.2? CLASS_HEX['Muito Alto'] : t<0.4? CLASS_HEX['Alto'] : t<0.6? CLASS_HEX['Médio'] : t<0.8? CLASS_HEX['Baixo'] : CLASS_HEX['Muito Baixo'];
+  });
+  attachMapEvents(el, s=>{ const i=DATA.samples.indexOf(s); return `#${s.id}: ${fmt(doses[i],0)} kg/ha`; });
+
+  let totalArea=0, totalKg=0;
+  document.getElementById('tvTableBody').innerHTML = orderIdx().map(i=>{
+    const s = DATA.samples[i];
+    const tot = doses[i]*s.area_ha; totalArea+=s.area_ha; totalKg+=tot;
+    return `<tr><td>#${s.id}</td><td class="num">${fmt(s.area_ha,2)}</td><td class="num">${fmt(doses[i],0)}</td><td class="num">${fmt(tot,0)}</td></tr>`;
+  }).join('');
+  document.getElementById('tvTotalArea').textContent = fmt(totalArea,2)+' ha';
+  document.getElementById('tvDoseMedia').textContent = fmt(totalKg/totalArea,0)+' méd.';
+  document.getElementById('tvTotalKg').textContent = fmt(totalKg,0)+' kg';
+
+  window._tvCache = {doses, totalArea, totalKg};
+}
+
+/* ================= PANEL: ECONÔMICO ================= */
+function panelEconomico(){
+  return `
+  <div class="grid cols-2">
+    <div class="card">
+      <h3>Preço do produto (${state.tv.fonte==='calagem'?'Calcário':state.tv.fonte==='npk_k'?state.fertK:state.fertP})</h3>
+      <div class="field"><label>Preço (R$/ton)</label><input type="number" id="ecoPreco" value="${state.tv.fonte==='calagem'?state.eco.precoCal*1000:state.tv.fonte==='npk_k'?state.eco.precoK*1000:state.eco.precoP*1000}"></div>
+      <div class="hint">Usa a mesma configuração de dose definida na aba Taxa Variável.</div>
+    </div>
+    <div class="card" id="ecoResult"></div>
+  </div>`;
+}
+function afterEconomico(){
+  document.getElementById('ecoPreco').oninput = e=>{
+    const precoTon = parseFloat(e.target.value)||0;
+    const precoKg = precoTon/1000;
+    if(state.tv.fonte==='calagem') state.eco.precoCal = precoKg;
+    else if(state.tv.fonte==='npk_k') state.eco.precoK = precoKg;
+    else state.eco.precoP = precoKg;
+    renderEcoResult();
+  };
+  renderEcoResult();
+}
+function renderEcoResult(){
+  const doses = DATA.samples.map(s=>tvClamp(tvDoseFor(s)));
+  const totalArea = DATA.samples.reduce((a,s)=>a+s.area_ha,0);
+  const totalKgVar = DATA.samples.reduce((a,s,i)=>a+doses[i]*s.area_ha,0);
+  const doseMedia = totalKgVar/totalArea;
+  const totalKgUnif = doseMedia*totalArea; // by construction equal — uniform applies the field average everywhere
+  const precoKg = state.tv.fonte==='calagem'?state.eco.precoCal:state.tv.fonte==='npk_k'?state.eco.precoK:state.eco.precoP;
+
+  // uniform cost uses SAME total product (area-weighted mean dose everywhere) — so cost is equal;
+  // the real economic gain of VRA is reallocation, shown as kg saved in low-need zones vs kg added in high-need zones
+  const economiaZonas = DATA.samples.map((s,i)=>({id:s.id, delta:(doses[i]-doseMedia)*s.area_ha}));
+  const economizado = economiaZonas.filter(z=>z.delta<0).reduce((a,z)=>a-z.delta,0);
+  const adicional = economiaZonas.filter(z=>z.delta>0).reduce((a,z)=>a+z.delta,0);
+
+  document.getElementById('ecoResult').innerHTML = `
+    <h3>Comparativo Uniforme × Taxa Variável</h3>
+    <table>
+      <tr><td>Dose média uniforme</td><td class="num">${fmt(doseMedia,0)} kg/ha</td></tr>
+      <tr><td>Total de produto (ambos cenários)</td><td class="num">${fmt(totalKgVar,0)} kg</td></tr>
+      <tr><td>Custo total (ambos cenários)</td><td class="num">R$ ${fmt(totalKgVar*precoKg,0)}</td></tr>
+      <tr><td style="color:var(--moss-dark);font-weight:600;">Produto realocado de zonas de baixa necessidade</td><td class="num" style="color:var(--moss-dark);font-weight:600;">${fmt(economizado,0)} kg</td></tr>
+      <tr><td style="color:var(--ochre);font-weight:600;">Produto adicional em zonas de alta necessidade</td><td class="num" style="color:var(--ochre);font-weight:600;">${fmt(adicional,0)} kg</td></tr>
+    </table>
+    <div class="note soft" style="margin-top:12px;">O custo total tende a ser semelhante ao de uma aplicação uniforme na dose média — o ganho da taxa variável está em não sub-adubar zonas carentes nem desperdiçar produto em zonas já supridas, o que se reflete em produtividade e eficiência de uso, não apenas no custo direto do insumo.</div>
+  `;
+}
+
+/* ================= PANEL: EXPORTAÇÃO ================= */
+function panelExportacao(){
+  return `
+  <div class="grid cols-2">
+    <div class="card">
+      <h3>Exportar prescrição atual</h3>
+      <p class="hint">Exporta a dose configurada na aba <b>Taxa Variável</b> (${state.tv.fonte}), por zona/amostra.</p>
+      <div class="row" style="margin-top:14px;">
+        <button class="btn" id="btnCsv">Baixar CSV</button>
+        <button class="btn ghost" id="btnGeojson">Baixar GeoJSON</button>
+      </div>
+      <div class="note" style="margin-top:16px;">Formato prototípico (CSV / GeoJSON), pensado para revisão e para importação em GIS. Exportação ISO-XML certificada para monitores de fabricante exigiria integração adicional específica por marca de equipamento.</div>
+    </div>
+    <div class="card">
+      <h3>Pré-visualização</h3>
+      <table><thead><tr><th>Zona</th><th class="num">Lat</th><th class="num">Lon</th><th class="num">Dose (kg/ha)</th></tr></thead>
+      <tbody>${sortedSamples().map(s=>`<tr><td>#${s.id}</td><td class="num">${s.lat.toFixed(6)}</td><td class="num">${s.lon.toFixed(6)}</td><td class="num">${fmt(tvClamp(tvDoseFor(s)),0)}</td></tr>`).join('')}</tbody></table>
+    </div>
+  </div>`;
+}
+function download(filename, content, mime){
+  const blob = new Blob([content], {type:mime});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+function afterExportacao(){
+  document.getElementById('btnCsv').onclick = ()=>{
+    let csv = 'id,lat,lon,area_ha,dose_kg_ha,fonte\n';
+    DATA.samples.forEach(s=>{ csv += `${s.id},${s.lat},${s.lon},${s.area_ha},${tvClamp(tvDoseFor(s))},${state.tv.fonte}\n`; });
+    download('prescricao_'+state.tv.fonte+'.csv', csv, 'text/csv');
+  };
+  document.getElementById('btnGeojson').onclick = ()=>{
+    const fc = { type:'FeatureCollection', features: DATA.samples.map(s=>({
+      type:'Feature', geometry:{type:'Point', coordinates:[s.lon,s.lat]},
+      properties:{ id:s.id, area_ha:s.area_ha, dose_kg_ha: tvClamp(tvDoseFor(s)), fonte: state.tv.fonte, talhao: DATA.talhao.nome }
+    }))};
+    download('prescricao_'+state.tv.fonte+'.geojson', JSON.stringify(fc,null,2), 'application/geo+json');
+  };
+}
+
+/* ================= PANEL: CADASTRO ================= */
+function panelCadastro(){
+  const propOpts = (window._propsCache||[]).map(p=>`<option value="${p.id}">${p.nome}</option>`).join('');
+  return `
+  <div class="grid cols-2">
+    <div class="card">
+      <h3>1. Propriedade</h3>
+      <div class="field"><label>Nome</label><input type="text" id="cadPropNome" placeholder="Ex.: Agropecuária Michelon"></div>
+      <div class="row">
+        <div class="field"><label>Produtor</label><input type="text" id="cadPropProdutor"></div>
+        <div class="field"><label>Município/UF</label><input type="text" id="cadPropMun" placeholder="Santa Maria/RS"></div>
+      </div>
+      <button class="btn" id="btnCriarProp">Criar propriedade</button>
+      <div id="cadPropMsg" class="hint"></div>
+
+      <h3 style="margin-top:22px;">2. Fazenda</h3>
+      <div class="field"><label>Propriedade</label><select id="cadFazPropSel"><option value="">Carregando…</option></select></div>
+      <div class="field"><label>Nome da fazenda</label><input type="text" id="cadFazNome" placeholder="Ex.: Sede"></div>
+      <button class="btn" id="btnCriarFaz">Criar fazenda</button>
+      <div id="cadFazMsg" class="hint"></div>
+    </div>
+
+    <div class="card">
+      <h3>3. Talhão (limite georreferenciado)</h3>
+      <div class="field"><label>Fazenda</label><select id="cadTalFazSel"><option value="">Carregando…</option></select></div>
+      <div class="field"><label>Nome do talhão</label><input type="text" id="cadTalNome" placeholder="Ex.: GraxaimFrente"></div>
+      <div class="field"><label>Sistema de plantio</label><input type="text" id="cadTalSistema" placeholder="Plantio direto"></div>
+      <div class="field"><label>Arquivo KML do limite do talhão</label><input type="file" id="cadTalKml" accept=".kml"></div>
+      <div class="hint">Aceita KML exportado do Google Earth / softwares de agricultura de precisão. Shapefile e GeoJSON entram como próximo incremento — hoje o caminho testado é KML.</div>
+      <button class="btn" id="btnCriarTal" style="margin-top:10px;">Criar talhão</button>
+      <div id="cadTalMsg" class="hint"></div>
+
+      <h3 style="margin-top:22px;">4. Safra</h3>
+      <div class="field"><label>Talhão</label><select id="cadSafTalSel"><option value="">Carregando…</option></select></div>
+      <div class="row">
+        <div class="field"><label>Nome (ex.: 2026/27)</label><input type="text" id="cadSafNome"></div>
+        <div class="field"><label>Cultura</label><input type="text" id="cadSafCultura" placeholder="Soja"></div>
+      </div>
+      <div class="field"><label>Produtividade esperada</label><input type="number" id="cadSafProd" placeholder="60"></div>
+      <button class="btn" id="btnCriarSaf">Criar safra</button>
+      <div id="cadSafMsg" class="hint"></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px;">
+    <h3>5. Importar amostras de solo (CSV)</h3>
+    <div class="row">
+      <div class="field"><label>Talhão</label><select id="cadImpTalSel"><option value="">Carregando…</option></select></div>
+      <div class="field"><label>Safra</label><select id="cadImpSafSel"><option value="">Selecione o talhão primeiro</option></select></div>
+    </div>
+    <div class="field"><label>Arquivo CSV</label><input type="file" id="cadImpCsv" accept=".csv"></div>
+    <div class="hint">Formato "largo": uma coluna por atributo, igual a um laudo de laboratório exportado em planilha (número do ponto, latitude, longitude + quantas colunas de nutrientes quiser).</div>
+    <div id="cadImpColMap" style="margin-top:10px;"></div>
+    <button class="btn" id="btnImportarCsv" style="margin-top:10px;" disabled>Selecione um CSV primeiro</button>
+    <div id="cadImpMsg" class="hint"></div>
+  </div>
+  <div class="note soft" style="margin-top:14px;">
+    Ainda não há login — toda propriedade criada aqui fica associada ao usuário padrão do seed.
+    Autenticação multiusuário é o próximo passo natural depois deste módulo.
+  </div>`;
+}
+
+async function refreshCadastroSelects(){
+  const props = await (await fetch(`${API_BASE}/propriedades`)).json();
+  window._propsCache = props;
+  const propSel = p => props.map(x=>`<option value="${x.id}">${x.nome}</option>`).join('') || '<option value="">Nenhuma propriedade ainda</option>';
+  document.getElementById('cadFazPropSel').innerHTML = propSel();
+
+  const talhoes = await (await fetch(`${API_BASE}/talhoes`)).json();
+  window._talhoesCache = talhoes;
+  const talOptsFaz = await Promise.all(props.map(async p=>{
+    const fazendas = await (await fetch(`${API_BASE}/propriedades/${p.id}/fazendas`)).json();
+    return fazendas.map(f=>`<option value="${f.id}">${p.nome} / ${f.nome}</option>`).join('');
+  }));
+  const fazHtml = talOptsFaz.join('') || '<option value="">Crie uma fazenda primeiro</option>';
+  document.getElementById('cadTalFazSel').innerHTML = fazHtml;
+
+  const talSelHtml = talhoes.map(t=>`<option value="${t.id}">${t.propriedade} / ${t.fazenda} / ${t.nome}</option>`).join('') || '<option value="">Crie um talhão primeiro</option>';
+  document.getElementById('cadSafTalSel').innerHTML = talSelHtml;
+  document.getElementById('cadImpTalSel').innerHTML = talSelHtml;
+}
+
+function afterCadastro(){
+  refreshCadastroSelects();
+
+  document.getElementById('btnCriarProp').onclick = async () => {
+    const nome = document.getElementById('cadPropNome').value.trim();
+    if (!nome) return;
+    const fd = new FormData();
+    fd.append('nome', nome);
+    fd.append('produtor', document.getElementById('cadPropProdutor').value);
+    fd.append('municipio', document.getElementById('cadPropMun').value);
+    const r = await fetch(`${API_BASE}/propriedades`, {method:'POST', body:fd});
+    const j = await r.json();
+    document.getElementById('cadPropMsg').textContent = r.ok ? `Criada: ${j.nome}` : `Erro: ${j.detail||r.status}`;
+    if (r.ok) refreshCadastroSelects();
+  };
+
+  document.getElementById('btnCriarFaz').onclick = async () => {
+    const propId = document.getElementById('cadFazPropSel').value;
+    const nome = document.getElementById('cadFazNome').value.trim();
+    if (!propId || !nome) { document.getElementById('cadFazMsg').textContent = 'Selecione a propriedade e informe o nome.'; return; }
+    const fd = new FormData(); fd.append('nome', nome);
+    const r = await fetch(`${API_BASE}/propriedades/${propId}/fazendas`, {method:'POST', body:fd});
+    const j = await r.json();
+    document.getElementById('cadFazMsg').textContent = r.ok ? `Criada: ${j.nome}` : `Erro: ${j.detail||r.status}`;
+    if (r.ok) refreshCadastroSelects();
+  };
+
+  document.getElementById('btnCriarTal').onclick = async () => {
+    const fazId = document.getElementById('cadTalFazSel').value;
+    const nome = document.getElementById('cadTalNome').value.trim();
+    const kmlInput = document.getElementById('cadTalKml');
+    if (!fazId || !nome || !kmlInput.files.length) { document.getElementById('cadTalMsg').textContent = 'Selecione a fazenda, o nome e um arquivo KML.'; return; }
+    const fd = new FormData();
+    fd.append('nome', nome);
+    fd.append('sistema_plantio', document.getElementById('cadTalSistema').value);
+    fd.append('kml_file', kmlInput.files[0]);
+    const r = await fetch(`${API_BASE}/fazendas/${fazId}/talhoes`, {method:'POST', body:fd});
+    const j = await r.json();
+    document.getElementById('cadTalMsg').textContent = r.ok ? `Criado: ${j.nome} (${fmt(j.area_ha,1)} ha)` : `Erro: ${j.detail||r.status}`;
+    if (r.ok) { await refreshCadastroSelects(); await loadTalhoesList(); }
+  };
+
+  document.getElementById('btnCriarSaf').onclick = async () => {
+    const talId = document.getElementById('cadSafTalSel').value;
+    const nome = document.getElementById('cadSafNome').value.trim();
+    if (!talId || !nome) { document.getElementById('cadSafMsg').textContent = 'Selecione o talhão e informe o nome da safra.'; return; }
+    const fd = new FormData();
+    fd.append('nome', nome);
+    fd.append('cultura', document.getElementById('cadSafCultura').value);
+    const prod = document.getElementById('cadSafProd').value;
+    if (prod) fd.append('produtividade_esperada', prod);
+    const r = await fetch(`${API_BASE}/talhoes/${talId}/safras`, {method:'POST', body:fd});
+    const j = await r.json();
+    document.getElementById('cadSafMsg').textContent = r.ok ? `Criada: ${j.nome}` : `Erro: ${j.detail||r.status}`;
+  };
+
+  const impTalSel = document.getElementById('cadImpTalSel');
+  impTalSel.onchange = async () => {
+    const talId = impTalSel.value;
+    if (!talId) return;
+    const safras = await (await fetch(`${API_BASE}/talhoes/${talId}/safras`)).json();
+    document.getElementById('cadImpSafSel').innerHTML = safras.map(s=>`<option value="${s.id}">${s.nome}</option>`).join('') || '<option value="">Crie uma safra primeiro</option>';
+  };
+
+  const csvInput = document.getElementById('cadImpCsv');
+  const btnImp = document.getElementById('btnImportarCsv');
+  csvInput.onchange = () => {
+    const file = csvInput.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const firstLine = reader.result.split(/\r?\n/)[0];
+      const cols = firstLine.split(',').map(c=>c.trim());
+      const opt = (c, guess) => `<option value="${c}" ${c===guess?'selected':''}>${c}</option>`;
+      // heurística simples: tenta adivinhar a coluna certa pelo nome do cabeçalho,
+      // pra evitar o erro de deixar no valor padrão (1ª coluna) sem querer.
+      const findCol = (...termos) => cols.find(c => termos.some(t => c.toLowerCase().includes(t))) || cols[0];
+      const guessNumero = findCol('ponto', 'numero', 'número', 'id', 'amostra');
+      const guessLat = findCol('lat');
+      const guessLon = findCol('lon', 'lng');
+      document.getElementById('cadImpColMap').innerHTML = `
+        <div class="row">
+          <div class="field"><label>Coluna: número do ponto</label><select id="mapNumero">${cols.map(c=>opt(c,guessNumero))}</select></div>
+          <div class="field"><label>Coluna: latitude</label><select id="mapLat">${cols.map(c=>opt(c,guessLat))}</select></div>
+          <div class="field"><label>Coluna: longitude</label><select id="mapLon">${cols.map(c=>opt(c,guessLon))}</select></div>
+        </div>
+        <div class="hint">Sugestão automática pelo nome da coluna — confira antes de importar. As demais colunas (${Math.max(cols.length-3,0)}) entram como atributos do solo.</div>
+      `;
+      btnImp.disabled = false;
+      btnImp.textContent = 'Importar amostras';
+    };
+    reader.readAsText(file);
+  };
+
+  btnImp.onclick = async () => {
+    const talId = document.getElementById('cadImpTalSel').value;
+    const safId = document.getElementById('cadImpSafSel').value;
+    if (!talId || !safId) { document.getElementById('cadImpMsg').textContent = 'Selecione talhão e safra.'; return; }
+    const colNumero = document.getElementById('mapNumero').value;
+    const colLat = document.getElementById('mapLat').value;
+    const colLon = document.getElementById('mapLon').value;
+    if (colLat === colLon || colLat === colNumero || colLon === colNumero) {
+      document.getElementById('cadImpMsg').textContent = 'As colunas de número/latitude/longitude precisam ser diferentes entre si — confira o mapeamento acima.';
+      return;
+    }
+    const fd = new FormData();
+    fd.append('arquivo', csvInput.files[0]);
+    fd.append('col_numero', colNumero);
+    fd.append('col_lat', colLat);
+    fd.append('col_lon', colLon);
+    const r = await fetch(`${API_BASE}/talhoes/${talId}/safras/${safId}/amostras/importar`, {method:'POST', body:fd});
+    const j = await r.json();
+    document.getElementById('cadImpMsg').textContent = r.ok
+      ? `Importado: ${j.amostras_importadas} amostras, ${j.resultados_importados} resultados. Troque para esse talhão/safra no topo da página para ver os mapas.`
+      : `Erro: ${j.detail||r.status}`;
+  };
+}
+
+/* ================= PANEL: COMPARAR SAFRAS ================= */
+function panelSafras(){
+  if (SAFRAS_LIST.length < 2) {
+    return `<div class="card"><h3>Comparar Safras</h3>
+      <p class="hint">Este talhão tem ${SAFRAS_LIST.length} safra(s) cadastrada(s). Cadastre pelo menos duas (aba Cadastro) e importe amostras em cada uma para comparar a evolução da fertilidade entre anos.</p>
+    </div>`;
+  }
+  return `
+  <div class="card">
+    <h3>Comparar duas safras do talhão ${DATA.talhao.nome}</h3>
+    <div class="row">
+      <div class="field"><label>Safra A</label><select id="cmpSafA">${SAFRAS_LIST.map(s=>`<option value="${s.id}">${s.nome}</option>`).join('')}</select></div>
+      <div class="field"><label>Safra B</label><select id="cmpSafB">${SAFRAS_LIST.map((s,i)=>`<option value="${s.id}" ${i===1?'selected':''}>${s.nome}</option>`).join('')}</select></div>
+      <div class="field"><label>Atributo</label><select id="cmpAtributo">${ELEMENT_LIST.map(e=>`<option value="${e}">${e}</option>`).join('')}</select></div>
+    </div>
+    <button class="btn" id="btnComparar">Comparar</button>
+    <div id="cmpResult" style="margin-top:16px;"></div>
+  </div>`;
+}
+
+function afterSafras(){
+  const btn = document.getElementById('btnComparar');
+  if (!btn) return;
+  btn.onclick = async () => {
+    const a = document.getElementById('cmpSafA').value;
+    const b = document.getElementById('cmpSafB').value;
+    const atributo = document.getElementById('cmpAtributo').value;
+    const r = await fetch(`${API_BASE}/talhoes/${CURRENT_TALHAO_ID}/safras/comparar?safra_a=${a}&safra_b=${b}&atributo=${encodeURIComponent(atributo)}`);
+    const j = await r.json();
+    if (!r.ok) { document.getElementById('cmpResult').innerHTML = `<div class="note">${j.detail||'Erro na comparação.'}</div>`; return; }
+    const delta = (j.safra_b.media||0) - (j.safra_a.media||0);
+    const sinal = delta > 0 ? '↑' : delta < 0 ? '↓' : '=';
+    document.getElementById('cmpResult').innerHTML = `
+      <table>
+        <thead><tr><th>Safra</th><th class="num">Média</th><th class="num">Mín</th><th class="num">Máx</th><th class="num">N amostras</th></tr></thead>
+        <tbody>
+          <tr><td>${j.safra_a.nome}</td><td class="num">${fmt(j.safra_a.media,2)}</td><td class="num">${fmt(j.safra_a.minimo,2)}</td><td class="num">${fmt(j.safra_a.maximo,2)}</td><td class="num">${j.safra_a.n}</td></tr>
+          <tr><td>${j.safra_b.nome}</td><td class="num">${fmt(j.safra_b.media,2)}</td><td class="num">${fmt(j.safra_b.minimo,2)}</td><td class="num">${fmt(j.safra_b.maximo,2)}</td><td class="num">${j.safra_b.n}</td></tr>
+        </tbody>
+      </table>
+      <div class="note soft" style="margin-top:12px;">Variação da média (${j.safra_a.nome} → ${j.safra_b.nome}): <b>${sinal} ${fmt(Math.abs(delta),2)}</b></div>
+    `;
+  };
+}
+
+/* ================= ROUTER ================= */
+const PANEL_FN = {
+  dashboard: {render:panelDashboard, after:afterDashboard},
+  mapa: {render:panelMapa, after:afterMapa},
+  calagem: {render:panelCalagem, after:afterCalagem},
+  npk: {render:panelNpk, after:afterNpk},
+  fertilizantes: {render:panelFertilizantes, after:afterFertilizantes},
+  taxavariavel: {render:panelTaxaVariavel, after:afterTaxaVariavel},
+  economico: {render:panelEconomico, after:afterEconomico},
+  exportacao: {render:panelExportacao, after:afterExportacao},
+  cadastro: {render:panelCadastro, after:afterCadastro},
+  safras: {render:panelSafras, after:afterSafras},
+};
+
+function renderPanel(){
+  const p = PANEL_FN[state.tab];
+  document.getElementById('panels').innerHTML = `<div class="panel active">${p.render()}</div>`;
+  p.after();
+}
+
+function renderContext(){
+  const talhaoOpts = TALHOES_LIST.map(t=>`<option value="${t.id}" ${t.id===CURRENT_TALHAO_ID?'selected':''}>${t.nome} — ${t.fazenda}</option>`).join('');
+  const safraOpts = SAFRAS_LIST.map(s=>`<option value="${s.id}" ${s.id===CURRENT_SAFRA_ID?'selected':''}>${s.nome}${s.cultura? ' · '+s.cultura : ''}</option>`).join('');
+  document.getElementById('contextPill').innerHTML = `
+    <div><b>${DATA.talhao.fazenda}</b><span>Fazenda</span></div>
+    <div>
+      <select id="ctxTalhaoSel" style="font-family:inherit;font-size:13px;font-weight:600;border:none;background:none;color:var(--ink);">${talhaoOpts}</select>
+      <span>Talhão</span>
+    </div>
+    ${SAFRAS_LIST.length ? `<div>
+      <select id="ctxSafraSel" style="font-family:inherit;font-size:13px;font-weight:600;border:none;background:none;color:var(--ink);">${safraOpts}</select>
+      <span>Safra</span>
+    </div>` : ''}
+    <div><b>${fmt(DATA.talhao.area_ha,1)} ha</b><span>Área</span></div>
+    <div><b>${DATA.talhao.n_amostras}</b><span>Amostras</span></div>
+  `;
+  const selT = document.getElementById('ctxTalhaoSel');
+  if (selT) selT.onchange = e => switchTalhao(e.target.value);
+  const selS = document.getElementById('ctxSafraSel');
+  if (selS) selS.onchange = e => switchSafra(e.target.value);
+  const footer = document.getElementById('footerCredit');
+  if (footer) footer.innerHTML = `Dados ao vivo via API (${API_BASE}) — banco PostgreSQL/PostGIS, talhão ${DATA.talhao.nome} / ${DATA.talhao.fazenda}. Fórmulas de calagem e NPK são metodologias-padrão configuráveis — ajuste conforme o manual de recomendação da sua região/laboratório antes de qualquer aplicação em campo.`;
+}
+
+/* ================= BOOT (assíncrono — busca dados reais na API) ================= */
+async function boot(){
+  const main = document.getElementById('main');
+  main.innerHTML = `<div style="padding:60px 0;text-align:center;color:var(--ink-soft);font-family:'IBM Plex Mono',monospace;">
+    Carregando dados de ${API_BASE} …
+  </div>`;
+  try {
+    const talhaoId = await resolveTalhaoId();
+    await loadData(talhaoId);
+    await loadTalhoesList();
+    // agora que DATA/GEO existem de verdade, monta a página normalmente
+    document.getElementById('main').innerHTML = `
+      <div class="topbar">
+        <div><h1 id="pageTitle">Visão Geral</h1><div class="desc" id="pageDesc">Painel do talhão.</div></div>
+        <div class="context-pill" id="contextPill"></div>
+      </div>
+      <div id="panels"></div>
+      <footer class="credit" id="footerCredit">Dados ao vivo via API (${API_BASE}) — banco PostgreSQL/PostGIS, talhão ${DATA.talhao.nome} / ${DATA.talhao.fazenda}. Fórmulas de calagem e NPK são metodologias-padrão configuráveis — ajuste conforme o manual de recomendação da sua região/laboratório antes de qualquer aplicação em campo.</footer>
+    `;
+    renderContext();
+    setTab('dashboard');
+  } catch (err) {
+    main.innerHTML = `<div style="max-width:520px;margin:60px auto;text-align:center;">
+      <h2 style="font-family:'Space Grotesk',sans-serif;">Não consegui falar com a API</h2>
+      <p style="color:var(--ink-soft);font-size:13px;line-height:1.6;">
+        ${err.message}<br><br>
+        Verifique se o backend está rodando em <code class="mono">${API_BASE}</code>
+        (veja o README do pacote <code class="mono">backend_agricultura_precisao.zip</code> —
+        <code class="mono">docker compose up</code> ou <code class="mono">uvicorn main:app --port 8000</code>).
+      </p>
+      <button class="btn" onclick="boot()" style="margin-top:10px;">Tentar novamente</button>
+    </div>`;
+  }
+}
+
+/* Página estática original (dados congelados) só é montada DEPOIS que DATA/GEO existem */
+if (DATA && GEO) {
+  renderContext();
+  setTab('dashboard');
+} else {
+  boot();
+}
+</script>
+
+</body>
+</html>
