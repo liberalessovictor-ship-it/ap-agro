@@ -760,8 +760,10 @@ function panelExportacao(){
       <div class="row" style="margin-top:14px;">
         <button class="btn" id="btnCsv">Baixar CSV</button>
         <button class="btn ghost" id="btnGeojson">Baixar GeoJSON</button>
+        <button class="btn ghost" id="btnShapefile">Baixar Shapefile (.zip)</button>
       </div>
-      <div class="note" style="margin-top:16px;">Formato prototípico (CSV / GeoJSON), pensado para revisão e para importação em GIS. Exportação ISO-XML certificada para monitores de fabricante exigiria integração adicional específica por marca de equipamento.</div>
+      <div id="shpMsg" class="hint" style="margin-top:8px;"></div>
+      <div class="note" style="margin-top:16px;">CSV/GeoJSON são formatos de revisão. O <b>Shapefile</b> (.shp+.shx+.dbf+.prj, zipados) é o formato que monitores de plantadeira/pulverizador e softwares de GIS (QGIS, SMS, etc.) realmente importam — cada polígono é uma zona de aplicação com a dose no atributo <code class="mono">dose</code>. Exportação ISO-XML certificada por fabricante ainda exigiria integração adicional específica por marca de equipamento.</div>
     </div>
     <div class="card">
       <h3>Pré-visualização</h3>
@@ -790,6 +792,35 @@ function afterExportacao(){
       properties:{ id:s.id, area_ha:s.area_ha, dose_kg_ha: tvClamp(tvDoseFor(s)), fonte: state.tv.fonte, talhao: DATA.talhao.nome }
     }))};
     download('prescricao_'+state.tv.fonte+'.geojson', JSON.stringify(fc,null,2), 'application/geo+json');
+  };
+  document.getElementById('btnShapefile').onclick = async ()=>{
+    const msg = document.getElementById('shpMsg');
+    msg.textContent = 'Gerando shapefile no servidor…';
+    const body = {
+      safra_id: CURRENT_SAFRA_ID,
+      fonte: state.tv.fonte,
+      unidade: 'kg/ha',
+      doses: DATA.samples.map(s => ({ numero_ponto: s.id, dose: tvClamp(tvDoseFor(s)) })),
+    };
+    try {
+      const resp = await fetch(`${API_BASE}/talhoes/${CURRENT_TALHAO_ID}/exportacao/shapefile`, {
+        method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(()=>({detail: resp.status}));
+        msg.textContent = 'Erro: ' + (err.detail || resp.status);
+        return;
+      }
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `prescricao_${state.tv.fonte}.zip`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      msg.textContent = 'Pronto — contém .shp, .shx, .dbf e .prj (WGS84).';
+    } catch (e) {
+      msg.textContent = 'Falha ao gerar: ' + e.message;
+    }
   };
 }
 
