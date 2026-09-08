@@ -519,3 +519,130 @@ def recomendar_calagem(talhao_id: str, v2: float = 70, prnt: float = 90, prof: f
         nc = max(0, nc) * (100 / prnt) * (prof / 20)
         result.append({**r, "dose_t_ha": round(nc, 3)})
     return {"parametros": {"v2": v2, "prnt": prnt, "prof": prof}, "amostras": result}
+
+
+# ============================================================
+# Exportação Shapefile — formato aceito por monitores agrícolas reais
+# ============================================================
+from pydantic import BaseModel
+import shapefile as pyshp
+import io, zipfile
+
+class DoseZona(BaseModel):
+    numero_ponto: str
+    dose: float
+
+class ExportShapefileBody(BaseModel):
+    safra_id: str | None = None
+    fonte: str = "prescricao"
+    unidade: str = "kg/ha"
+    doses: list[DoseZona]
+
+# WKT padrão do GCS WGS84 — necessário pro .prj, senão o GIS/monitor não sabe
+# em qual sistema de coordenadas o arquivo está.
+WKT_WGS84 = (
+    'GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137.0,298.257223563]],'
+    'PRIMEM["Greenwich",0.0],UNIT["Degree",0.0174532925199433]]'
+)
+
+def _zonas_reais_wgs84(cur, talhao_id: str, safra_id: str | None):
+    """Recalcula as zonas de Voronoi em coordenadas geográficas reais (lon/lat),
+    sem normalização — usadas só para exportação, não para desenho em tela."""
+    filtro = "AND a.safra_id = %s" if safra_id else ""
+    params = (talhao_id, safra_id) if safra_id else (talhao_id,)
+    cur.execute(f"""
+        WITH pts AS (
+            SELECT a.id AS amostra_id, a.numero_ponto, a.geom
+            FROM amostras a WHERE a.talhao_id = %s {filtro}
+        ),
+        mp AS ( SELECT ST_Collect(geom) AS g FROM pts ),
+        vor AS ( SELECT (ST_Dump(ST_VoronoiPolygons(g))).geom AS cell FROM mp )
+        SELECT p.numero_ponto,
+               ST_AsGeoJSON(ST_Intersection(v.cell, t.geom))::json AS zona
+        FROM vor v
+        JOIN talhoes t ON t.id = %s
+        JOIN pts p ON ST_Contains(v.cell, p.geom)
+        ORDER BY p.numero_ponto::int;
+    """, params + (talhao_id,))
+    return cur.fetchall()
+
+def _maior_anel(geom):
+    """Extrai o anel externo de um Polygon, ou o maior fragmento de um MultiPolygon
+    (mesma lógica de robustez usada no endpoint /app)."""
+    if not geom or not geom.get("coordinates"):
+        return None
+    try:
+        if geom["type"] == "Polygon" and len(geom["coordinates"][0]) >= 3:
+            return geom["coordinates"][0]
+        if geom["type"] == "MultiPolygon":
+            validos = [poly for poly in geom["coordinates"] if poly and len(poly[0]) >= 3]
+            if validos:
+                biggest = max(validos, key=lambda poly: shp_shape({"type": "Polygon", "coordinates": poly}).area)
+                return biggest[0]
+    except (KeyError, IndexError, TypeError):
+        return None
+    return None
+
+
+@app.post("/talhoes/{talhao_id}/exportacao/shapefile")
+def exportar_shapefile(talhao_id: str, body: ExportShapefileBody):
+    """
+    Gera um Shapefile de prescrição (zonas de aplicação em polígono + dose)
+    a partir das doses já calculadas no app (uma por amostra/zona), prontas
+    pra importar em QGIS ou em monitores agrícolas que aceitam .shp.
+    """
+    dose_map = {d.numero_ponto: d.dose for d in body.doses}
+
+    with get_cursor() as cur:
+        cur.execute("SELECT nome FROM talhoes WHERE id = %s;", (talhao_id,))
+        trow = cur.fetchone()
+        if not trow:
+            raise HTTPException(404, "Talhão não encontrado")
+        zonas = _zonas_reais_wgs84(cur, talhao_id, body.safra_id)
+
+    if not zonas:
+        raise HTTPException(400, "Nenhuma zona encontrada para este talhão/safra.")
+
+    shp_buf, shx_buf, dbf_buf = io.BytesIO(), io.BytesIO(), io.BytesIO()
+    writer = pyshp.Writer(shp=shp_buf, shx=shx_buf, dbf=dbf_buf, shapeType=pyshp.POLYGON)
+    writer.field("zona_id", "C", size=10)
+    writer.field("dose", "N", decimal=2)
+    writer.field("unidade", "C", size=10)
+    writer.field("talhao", "C", size=60)
+    writer.field("fonte", "C", size=30)
+
+    n_gravadas = 0
+    for z in zonas:
+        anel = _maior_anel(z["zona"])
+        if anel is None:
+            continue
+        dose = dose_map.get(z["numero_ponto"])
+        if dose is None:
+            continue
+        # shapefile exige anel no sentido horário para polígonos externos
+        writer.poly([anel])
+        writer.record(
+            zona_id=z["numero_ponto"], dose=round(float(dose), 2),
+            unidade=body.unidade, talhao=trow["nome"], fonte=body.fonte,
+        )
+        n_gravadas += 1
+    writer.close()
+
+    if n_gravadas == 0:
+        raise HTTPException(400, "Nenhuma zona com dose correspondente foi encontrada — confira o safra_id e os números de ponto enviados.")
+
+    zip_buf = io.BytesIO()
+    base = f"prescricao_{body.fonte}"
+    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f"{base}.shp", shp_buf.getvalue())
+        zf.writestr(f"{base}.shx", shx_buf.getvalue())
+        zf.writestr(f"{base}.dbf", dbf_buf.getvalue())
+        zf.writestr(f"{base}.prj", WKT_WGS84)
+    zip_buf.seek(0)
+
+    from fastapi.responses import Response
+    return Response(
+        content=zip_buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{base}.zip"'},
+    )
