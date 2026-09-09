@@ -13,6 +13,8 @@ import psycopg2
 import psycopg2.extras
 from contextlib import contextmanager
 import os, re, io, csv
+import pandas as pd
+from pandas import isna as pd_isna
 from shapely.geometry import shape as shp_shape
 
 # Lê configuração do banco de variáveis de ambiente (com defaults para rodar localmente).
@@ -219,6 +221,190 @@ async def importar_amostras_csv(talhao_id: str, safra_id: str, arquivo: UploadFi
                     continue
                 cur.execute("""INSERT INTO analises_laboratoriais (amostra_id, atributo, valor)
                                VALUES (%s,%s,%s);""", (amostra_id, col, v))
+                n_analises += 1
+    return {"amostras_importadas": n_amostras, "resultados_importados": n_analises}
+
+
+def _ler_planilha_bruta(nome_arquivo: str, conteudo: bytes) -> "pd.DataFrame":
+    """Lê CSV ou XLSX sem cabeçalho (grade crua), pra permitir detectar em
+    qual linha estão os nomes das colunas — necessário porque laudos de
+    laboratório costumam ter linhas de título/unidade antes dos dados."""
+    import pandas as pd
+    buf = io.BytesIO(conteudo)
+    if nome_arquivo.lower().endswith((".xlsx", ".xls")):
+        return pd.read_excel(buf, header=None)
+    # tenta detectar separador (vírgula ou ponto-e-vírgula, comum em export BR)
+    return pd.read_csv(buf, header=None, sep=None, engine="python")
+
+
+def _detectar_linha_cabecalho(df_raw) -> int:
+    """Procura, nas 10 primeiras linhas, a primeira que contenha uma célula
+    com 'lat' e outra com 'lon' — heurística simples mas eficaz pra achar
+    onde começam os nomes das colunas num laudo de laboratório real."""
+    for i in range(min(10, len(df_raw))):
+        vals = [str(v).strip().lower() for v in df_raw.iloc[i].tolist()]
+        if any("lat" in v for v in vals) and any(("lon" in v or "long" in v) for v in vals):
+            return i
+    return 0
+
+
+def _montar_tabela(df_raw, linha_cabecalho: int):
+    """A partir da grade crua e da linha de cabeçalho (0-indexed), monta um
+    DataFrame com nomes de coluna certos e detecta/pula uma eventual linha
+    de unidades logo abaixo do cabeçalho (comum em laudos: 'mg/dm³', '%', etc.
+    na linha seguinte ao nome da coluna).
+
+    Detecção: compara quantas células são numéricas na linha logo após o
+    cabeçalho vs. na linha seguinte a essa — uma linha de unidades tem bem
+    menos células numéricas que uma linha de dados de verdade (checar só
+    lat/lon não bastava, porque essas colunas não têm unidade e ficam em
+    branco também na linha de unidades).
+    """
+    def n_numericas(row):
+        n = 0
+        for v in row:
+            try:
+                if str(v).strip() == "" or str(v).strip().lower() == "nan":
+                    continue
+                float(str(v).replace(",", "."))
+                n += 1
+            except (ValueError, TypeError):
+                pass
+        return n
+
+    headers = df_raw.iloc[linha_cabecalho].astype(str).str.strip().tolist()
+    corpo = df_raw.iloc[linha_cabecalho + 1:].reset_index(drop=True)
+
+    linha_unidades = False
+    unidades = {}
+    if len(corpo) >= 2:
+        n1, n2 = n_numericas(corpo.iloc[0]), n_numericas(corpo.iloc[1])
+        if n2 > 0 and n1 <= n2 * 0.4:
+            linha_unidades = True
+            unidades = {h: str(v).strip() for h, v in zip(headers, corpo.iloc[0].tolist())
+                        if str(v).strip() not in ("", "nan")}
+            corpo = corpo.iloc[1:].reset_index(drop=True)
+
+    corpo.columns = headers
+    return corpo, linha_unidades, unidades
+
+
+@app.post("/utils/preview_planilha")
+async def preview_planilha(arquivo: UploadFile = File(...), linha_cabecalho: int | None = Form(None)):
+    """
+    Primeiro passo da importação de uma planilha de laboratório "crua" (sem
+    precisar limpar antes): lê o arquivo, detecta (ou usa a linha indicada)
+    onde estão os nomes das colunas, e devolve as colunas + uma prévia —
+    o app usa isso pra montar as caixinhas de mapeamento (igual já faz com CSV),
+    antes de você confirmar e importar de verdade.
+    """
+    conteudo = await arquivo.read()
+    try:
+        df_raw = _ler_planilha_bruta(arquivo.filename, conteudo)
+    except Exception as e:
+        raise HTTPException(400, f"Não consegui ler o arquivo: {e}")
+
+    idx = (linha_cabecalho - 1) if linha_cabecalho else _detectar_linha_cabecalho(df_raw)
+    if idx < 0 or idx >= len(df_raw):
+        raise HTTPException(400, "Linha de cabeçalho fora do intervalo do arquivo.")
+    data, pulou_unidades, _ = _montar_tabela(df_raw, idx)
+
+    preview_rows = data.head(3).fillna("").astype(str).to_dict(orient="records")
+
+    # Sugestão de quais colunas são atributos de solo de verdade (não metadado
+    # tipo "Produtor"/"Código da Amostra"): fora do palpite óbvio (nome bate
+    # com termos de metadado, ou o valor é igual em todas as linhas — típico
+    # de campos como Produtor/Fazenda/Talhão/Data que não variam por amostra).
+    metadado_termos = ["data", "codigo", "código", "produtor", "fazenda", "talhão", "talhao",
+                       "barras", "amostra", "ponto", "latitude", "longitude", "profundidade"]
+    sugestoes_atributo = []
+    for c in data.columns:
+        nome_l = str(c).lower()
+        if any(t in nome_l for t in metadado_termos):
+            continue
+        valores = data[c].astype(str).str.strip()
+        if valores.nunique(dropna=True) <= 1:
+            continue
+        sugestoes_atributo.append(str(c))
+
+    return {
+        "linha_cabecalho": idx + 1,
+        "linha_unidades_detectada": pulou_unidades,
+        "colunas": [str(c) for c in data.columns],
+        "colunas_sugeridas_atributo": sugestoes_atributo,
+        "n_linhas_dados": len(data),
+        "preview": preview_rows,
+    }
+
+
+@app.post("/talhoes/{talhao_id}/safras/{safra_id}/amostras/importar_planilha")
+async def importar_planilha(talhao_id: str, safra_id: str, arquivo: UploadFile = File(...),
+                             linha_cabecalho: int = Form(...), col_numero: str = Form(...),
+                             col_lat: str = Form(...), col_lon: str = Form(...),
+                             col_prof: str | None = Form(None), colunas_atributo: str = Form(...)):
+    """
+    Segundo passo: com a linha de cabeçalho já confirmada, as colunas de
+    localização mapeadas e a lista de quais colunas são atributos de solo
+    de verdade (evita importar coisa como "Código da Amostra" como se fosse
+    um nutriente), importa a planilha original do laboratório sem precisar
+    convertê-la à mão antes. colunas_atributo é uma lista JSON de nomes.
+    """
+    import json as _json
+    try:
+        atributo_cols = _json.loads(colunas_atributo)
+        assert isinstance(atributo_cols, list)
+    except Exception:
+        raise HTTPException(400, "colunas_atributo deve ser uma lista JSON de nomes de coluna.")
+
+    conteudo = await arquivo.read()
+    try:
+        df_raw = _ler_planilha_bruta(arquivo.filename, conteudo)
+    except Exception as e:
+        raise HTTPException(400, f"Não consegui ler o arquivo: {e}")
+
+    idx = linha_cabecalho - 1
+    if idx < 0 or idx >= len(df_raw):
+        raise HTTPException(400, "Linha de cabeçalho fora do intervalo do arquivo.")
+    data, _, unidades = _montar_tabela(df_raw, idx)
+
+    for req in (col_numero, col_lat, col_lon):
+        if req not in data.columns:
+            raise HTTPException(400, f"Coluna '{req}' não encontrada. Colunas disponíveis: {list(data.columns)}")
+    if len({col_numero, col_lat, col_lon}) < 3:
+        raise HTTPException(400, "As colunas de número/latitude/longitude precisam ser diferentes entre si.")
+    atributo_cols = [c for c in atributo_cols if c in data.columns]
+
+    n_amostras = n_analises = 0
+    with get_cursor() as cur:
+        for _, row in data.iterrows():
+            try:
+                lat = float(str(row[col_lat]).replace(",", "."))
+                lon = float(str(row[col_lon]).replace(",", "."))
+            except (TypeError, ValueError):
+                continue
+            if pd_isna(row[col_numero]):
+                continue
+            prof = None
+            if col_prof and col_prof in data.columns and not pd_isna(row.get(col_prof)):
+                try:
+                    prof = float(str(row[col_prof]).replace(",", "."))
+                except ValueError:
+                    prof = None
+            cur.execute("""INSERT INTO amostras (talhao_id, safra_id, numero_ponto, geom, profundidade_cm)
+                           VALUES (%s,%s,%s, ST_SetSRID(ST_MakePoint(%s,%s),4326), %s)
+                           RETURNING id;""", (talhao_id, safra_id, str(row[col_numero]).strip(), lon, lat, prof or 20))
+            amostra_id = cur.fetchone()["id"]
+            n_amostras += 1
+            for col in atributo_cols:
+                val = row.get(col)
+                if pd_isna(val) or str(val).strip() == "":
+                    continue
+                try:
+                    v = float(str(val).replace(",", "."))
+                except ValueError:
+                    continue
+                cur.execute("""INSERT INTO analises_laboratoriais (amostra_id, atributo, valor, unidade)
+                               VALUES (%s,%s,%s,%s);""", (amostra_id, str(col), v, unidades.get(col, "")))
                 n_analises += 1
     return {"amostras_importadas": n_amostras, "resultados_importados": n_analises}
 
