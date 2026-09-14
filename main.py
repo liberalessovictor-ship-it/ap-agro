@@ -196,8 +196,8 @@ async def importar_amostras_csv(talhao_id: str, safra_id: str, arquivo: UploadFi
     with get_cursor() as cur:
         for row in reader:
             try:
-                lat = float(str(row[col_lat]).replace(",", "."))
-                lon = float(str(row[col_lon]).replace(",", "."))
+                lat = _parse_coord(row[col_lat])
+                lon = _parse_coord(row[col_lon])
             except (TypeError, ValueError):
                 continue
             prof = None
@@ -223,6 +223,26 @@ async def importar_amostras_csv(talhao_id: str, safra_id: str, arquivo: UploadFi
                                VALUES (%s,%s,%s);""", (amostra_id, col, v))
                 n_analises += 1
     return {"amostras_importadas": n_amostras, "resultados_importados": n_analises}
+
+
+def _parse_coord(valor) -> float:
+    """
+    Converte um valor de latitude/longitude vindo de planilha em float,
+    aceitando formatos comuns além do simples '-29.83': símbolo de grau
+    ('-29.832714°'), aspas de minutos/segundos, letras de hemisfério
+    (N/S/E/W, indicando negativo quando são S ou W) e vírgula decimal.
+    Lança ValueError se não for parseável.
+    """
+    s = str(valor).strip()
+    hemisferio_negativo = bool(re.search(r"[SsWw]\s*$", s))
+    s = s.replace(",", ".")
+    s = re.sub(r"[^0-9.\-eE]", "", s)
+    if s in ("", "-", "."):
+        raise ValueError(f"coordenada vazia após limpeza: {valor!r}")
+    v = float(s)
+    if hemisferio_negativo and v > 0:
+        v = -v
+    return v
 
 
 def _ler_planilha_bruta(nome_arquivo: str, conteudo: bytes) -> "pd.DataFrame":
@@ -378,8 +398,8 @@ async def importar_planilha(talhao_id: str, safra_id: str, arquivo: UploadFile =
     with get_cursor() as cur:
         for _, row in data.iterrows():
             try:
-                lat = float(str(row[col_lat]).replace(",", "."))
-                lon = float(str(row[col_lon]).replace(",", "."))
+                lat = _parse_coord(row[col_lat])
+                lon = _parse_coord(row[col_lon])
             except (TypeError, ValueError):
                 continue
             if pd_isna(row[col_numero]):
