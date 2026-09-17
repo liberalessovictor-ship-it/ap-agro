@@ -157,8 +157,9 @@
     box-shadow:var(--shadow); white-space:nowrap;
   }
   svg.fieldmap{ width:100%; height:auto; display:block; }
-  .zone-path{ stroke:#ffffff; stroke-width:2; cursor:pointer; transition:opacity .15s; }
-  .zone-path:hover{ opacity:.82; }
+  .zone-path-blur{ pointer-events:none; }
+  .zone-path{ fill:transparent; stroke:none; cursor:pointer; }
+  .zone-path:hover{ stroke:#ffffff; stroke-width:2.5; stroke-opacity:.85; }
   .field-outline{ fill:none; stroke:var(--ink); stroke-width:3; }
   .pt-dot{ fill:#fff; stroke:var(--ink); stroke-width:1.5; }
   .pt-label{ font-family:'IBM Plex Mono',monospace; font-size:16px; fill:var(--ink); }
@@ -354,17 +355,34 @@ function sampleClass(s, elem){ return s.values[elem] ? s.values[elem].classe : n
 function sampleValue(s, elem){ return s.values[elem] ? s.values[elem].v : null; }
 
 /* ---- SVG field map, generic: color function per sample -> hex, label function -> string ---- */
+let _mapRenderCounter = 0;
 function renderFieldMap(colorFn, opts={}){
   const vb = GEO.viewBox;
+  const uid = 'm' + (_mapRenderCounter++);
+  const fieldD = 'M ' + GEO.field.map(p=>p.join(',')).join(' L ') + ' Z';
   let svg = `<svg class="fieldmap" viewBox="${vb.join(' ')}" xmlns="http://www.w3.org/2000/svg">`;
+  svg += `<defs>
+    <filter id="blur-${uid}" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="14"></feGaussianBlur>
+    </filter>
+    <clipPath id="clip-${uid}"><path d="${fieldD}"></path></clipPath>
+  </defs>`;
+  svg += `<g filter="url(#blur-${uid})" clip-path="url(#clip-${uid})">`;
   GEO.zones.forEach((zpts,i)=>{
     if(!zpts) return;
     const s = DATA.samples[i];
     const color = colorFn(s,i) || '#EDEAE0';
     const d = 'M ' + zpts.map(p=>p.join(',')).join(' L ') + ' Z';
-    svg += `<path class="zone-path" d="${d}" fill="${color}" data-idx="${i}"></path>`;
+    svg += `<path class="zone-path-blur" d="${d}" fill="${color}"></path>`;
   });
-  svg += `<path class="field-outline" d="M ${GEO.field.map(p=>p.join(',')).join(' L ')} Z"></path>`;
+  svg += `</g>`;
+  // camada transparente por cima, só pra capturar clique/hover em cada zona (sem desfoque)
+  GEO.zones.forEach((zpts,i)=>{
+    if(!zpts) return;
+    const d = 'M ' + zpts.map(p=>p.join(',')).join(' L ') + ' Z';
+    svg += `<path class="zone-path" d="${d}" fill="transparent" data-idx="${i}"></path>`;
+  });
+  svg += `<path class="field-outline" d="${fieldD}"></path>`;
   GEO.points.forEach((p,i)=>{
     svg += `<circle class="pt-dot" cx="${p[0]}" cy="${p[1]}" r="10"></circle>`;
     svg += `<text class="pt-label" x="${p[0]+13}" y="${p[1]+5}">${DATA.samples[i].id}</text>`;
@@ -869,17 +887,40 @@ function panelCadastro(){
   </div>
 
   <div class="card" style="margin-top:16px;">
-    <h3>5. Importar amostras de solo (CSV)</h3>
+    <h3>5. Importar amostras de solo</h3>
     <div class="row">
       <div class="field"><label>Talhão</label><select id="cadImpTalSel"><option value="">Carregando…</option></select></div>
       <div class="field"><label>Safra</label><select id="cadImpSafSel"><option value="">Selecione o talhão primeiro</option></select></div>
     </div>
-    <div class="field"><label>Arquivo CSV</label><input type="file" id="cadImpCsv" accept=".csv"></div>
-    <div class="hint">Formato "largo": uma coluna por atributo, igual a um laudo de laboratório exportado em planilha (número do ponto, latitude, longitude + quantas colunas de nutrientes quiser).</div>
+    <div class="field"><label>Arquivo (.xlsx do laboratório, ou .csv já limpo)</label><input type="file" id="cadImpArq" accept=".csv,.xlsx,.xls"></div>
+    <div class="hint">Aceita a planilha ORIGINAL do laboratório, do jeito que ela vem (com linhas de título/unidade antes dos dados) — o sistema detecta sozinho onde começam as colunas. Também aceita CSV já limpo.</div>
     <div id="cadImpColMap" style="margin-top:10px;"></div>
-    <button class="btn" id="btnImportarCsv" style="margin-top:10px;" disabled>Selecione um CSV primeiro</button>
+    <button class="btn" id="btnImportarArq" style="margin-top:10px;" disabled>Selecione um arquivo primeiro</button>
     <div id="cadImpMsg" class="hint"></div>
   </div>
+
+  <div class="card" style="margin-top:16px;border-color:#E3B8AE;">
+    <h3>6. Excluir propriedades, talhões ou safras <span class="tag" style="color:var(--ochre);">irreversível</span></h3>
+    <div class="note" style="margin-bottom:14px;">Apagar uma propriedade ou talhão apaga junto TUDO que está embaixo dele (fazendas, safras, amostras, análises). Não tem como desfazer. Por segurança, você precisa digitar o nome exato pra confirmar cada exclusão.</div>
+
+    <label style="margin-bottom:6px;display:block;">Propriedades</label>
+    <table style="margin-bottom:18px;"><thead><tr><th>Nome</th><th class="num">Talhões</th><th></th></tr></thead>
+      <tbody id="delPropsBody"></tbody>
+    </table>
+
+    <label style="margin-bottom:6px;display:block;">Talhões</label>
+    <table style="margin-bottom:18px;"><thead><tr><th>Talhão</th><th>Fazenda</th><th class="num">Safras</th><th class="num">Amostras</th><th></th></tr></thead>
+      <tbody id="delTalhoesBody"></tbody>
+    </table>
+
+    <label style="margin-bottom:6px;display:block;">Safras (selecione o talhão)</label>
+    <select id="delSafTalSel" style="margin-bottom:8px;"><option value="">Carregando…</option></select>
+    <table><thead><tr><th>Safra</th><th>Cultura</th><th class="num">Amostras</th><th></th></tr></thead>
+      <tbody id="delSafrasBody"></tbody>
+    </table>
+    <div id="delMsg" class="hint" style="margin-top:8px;"></div>
+  </div>
+
   <div class="note soft" style="margin-top:14px;">
     Ainda não há login — toda propriedade criada aqui fica associada ao usuário padrão do seed.
     Autenticação multiusuário é o próximo passo natural depois deste módulo.
@@ -908,6 +949,7 @@ async function refreshCadastroSelects(){
 
 function afterCadastro(){
   refreshCadastroSelects();
+  refreshDelecaoListas();
 
   document.getElementById('btnCriarProp').onclick = async () => {
     const nome = document.getElementById('cadPropNome').value.trim();
@@ -919,7 +961,7 @@ function afterCadastro(){
     const r = await fetch(`${API_BASE}/propriedades`, {method:'POST', body:fd});
     const j = await r.json();
     document.getElementById('cadPropMsg').textContent = r.ok ? `Criada: ${j.nome}` : `Erro: ${j.detail||r.status}`;
-    if (r.ok) refreshCadastroSelects();
+    if (r.ok) { refreshCadastroSelects(); refreshDelecaoListas(); }
   };
 
   document.getElementById('btnCriarFaz').onclick = async () => {
@@ -945,7 +987,7 @@ function afterCadastro(){
     const r = await fetch(`${API_BASE}/fazendas/${fazId}/talhoes`, {method:'POST', body:fd});
     const j = await r.json();
     document.getElementById('cadTalMsg').textContent = r.ok ? `Criado: ${j.nome} (${fmt(j.area_ha,1)} ha)` : `Erro: ${j.detail||r.status}`;
-    if (r.ok) { await refreshCadastroSelects(); await loadTalhoesList(); }
+    if (r.ok) { await refreshCadastroSelects(); await loadTalhoesList(); renderContext(); refreshDelecaoListas(); }
   };
 
   document.getElementById('btnCriarSaf').onclick = async () => {
@@ -960,6 +1002,8 @@ function afterCadastro(){
     const r = await fetch(`${API_BASE}/talhoes/${talId}/safras`, {method:'POST', body:fd});
     const j = await r.json();
     document.getElementById('cadSafMsg').textContent = r.ok ? `Criada: ${j.nome}` : `Erro: ${j.detail||r.status}`;
+    if (r.ok && talId === CURRENT_TALHAO_ID) { await loadSafrasList(talId); renderContext(); }
+    if (r.ok) refreshDelecaoListas();
   };
 
   const impTalSel = document.getElementById('cadImpTalSel');
@@ -970,34 +1014,88 @@ function afterCadastro(){
     document.getElementById('cadImpSafSel').innerHTML = safras.map(s=>`<option value="${s.id}">${s.nome}</option>`).join('') || '<option value="">Crie uma safra primeiro</option>';
   };
 
-  const csvInput = document.getElementById('cadImpCsv');
-  const btnImp = document.getElementById('btnImportarCsv');
-  csvInput.onchange = () => {
-    const file = csvInput.files[0];
+  const arqInput = document.getElementById('cadImpArq');
+  const btnImp = document.getElementById('btnImportarArq');
+  let modoArquivo = null; // 'csv' | 'planilha'
+  let linhaCabecalhoDetectada = null;
+
+  function renderMapeamento(cols, sugeridas, guessNumero, guessLat, guessLon){
+    const opt = (c, guess) => `<option value="${c}" ${c===guess?'selected':''}>${c}</option>`;
+    const sugeridasSet = new Set(sugeridas || []);
+    document.getElementById('cadImpColMap').innerHTML = `
+      <div class="row">
+        <div class="field"><label>Coluna: número do ponto</label><select id="mapNumero">${cols.map(c=>opt(c,guessNumero))}</select></div>
+        <div class="field"><label>Coluna: latitude</label><select id="mapLat">${cols.map(c=>opt(c,guessLat))}</select></div>
+        <div class="field"><label>Coluna: longitude</label><select id="mapLon">${cols.map(c=>opt(c,guessLon))}</select></div>
+      </div>
+      <label style="margin-top:10px;">Quais colunas são atributos de solo (nutrientes etc.)?</label>
+      <div style="max-height:220px;overflow-y:auto;border:1px solid var(--line-strong);border-radius:7px;padding:8px 10px;margin-top:4px;">
+        ${cols.map(c=>`<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;padding:3px 0;">
+          <input type="checkbox" class="atribChk" value="${c}" ${sugeridasSet.has(c)?'checked':''}> ${c}
+        </label>`).join('')}
+      </div>
+      <div class="hint">Marcadas por sugestão automática — desmarque o que não for atributo de solo de verdade (ex.: códigos, nomes). Colunas escolhidas acima como número/latitude/longitude são ignoradas mesmo se marcadas.</div>
+    `;
+    btnImp.disabled = false;
+    btnImp.textContent = 'Importar amostras';
+  }
+
+  arqInput.onchange = () => {
+    const file = arqInput.files[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const firstLine = reader.result.split(/\r?\n/)[0];
-      const cols = firstLine.split(',').map(c=>c.trim());
-      const opt = (c, guess) => `<option value="${c}" ${c===guess?'selected':''}>${c}</option>`;
-      // heurística simples: tenta adivinhar a coluna certa pelo nome do cabeçalho,
-      // pra evitar o erro de deixar no valor padrão (1ª coluna) sem querer.
-      const findCol = (...termos) => cols.find(c => termos.some(t => c.toLowerCase().includes(t))) || cols[0];
-      const guessNumero = findCol('ponto', 'numero', 'número', 'id', 'amostra');
-      const guessLat = findCol('lat');
-      const guessLon = findCol('lon', 'lng');
-      document.getElementById('cadImpColMap').innerHTML = `
-        <div class="row">
-          <div class="field"><label>Coluna: número do ponto</label><select id="mapNumero">${cols.map(c=>opt(c,guessNumero))}</select></div>
-          <div class="field"><label>Coluna: latitude</label><select id="mapLat">${cols.map(c=>opt(c,guessLat))}</select></div>
-          <div class="field"><label>Coluna: longitude</label><select id="mapLon">${cols.map(c=>opt(c,guessLon))}</select></div>
-        </div>
-        <div class="hint">Sugestão automática pelo nome da coluna — confira antes de importar. As demais colunas (${Math.max(cols.length-3,0)}) entram como atributos do solo.</div>
-      `;
-      btnImp.disabled = false;
-      btnImp.textContent = 'Importar amostras';
-    };
-    reader.readAsText(file);
+    document.getElementById('cadImpMsg').textContent = '';
+    const isXlsx = /\.xlsx?$/i.test(file.name);
+
+    if (!isXlsx) {
+      modoArquivo = 'csv';
+      const reader = new FileReader();
+      reader.onload = () => {
+        const firstLine = reader.result.split(/\r?\n/)[0];
+        const cols = firstLine.split(',').map(c=>c.trim());
+        const findCol = (...termos) => {
+          for (const t of termos) {
+            const achado = cols.find(c => c.toLowerCase().includes(t));
+            if (achado) return achado;
+          }
+          return cols[0];
+        };
+        const guessNumero = findCol('ponto', 'numero', 'número', 'id', 'amostra');
+        const guessLat = findCol('lat');
+        const guessLon = findCol('lon', 'lng');
+        const sugeridas = cols.filter(c => ![guessNumero,guessLat,guessLon].includes(c));
+        renderMapeamento(cols, sugeridas, guessNumero, guessLat, guessLon);
+      };
+      reader.readAsText(file);
+      return;
+    }
+
+    // .xlsx: manda pro backend detectar linha de cabeçalho + sugerir colunas
+    modoArquivo = 'planilha';
+    document.getElementById('cadImpColMap').innerHTML = `<div class="hint">Lendo planilha e detectando cabeçalho…</div>`;
+    const fd = new FormData();
+    fd.append('arquivo', file);
+    fetch(`${API_BASE}/utils/preview_planilha`, {method:'POST', body:fd})
+      .then(r => r.json().then(j => ({ok:r.ok, j})))
+      .then(({ok, j}) => {
+        if (!ok) { document.getElementById('cadImpColMap').innerHTML = `<div class="note">Erro: ${j.detail||'não consegui ler a planilha'}</div>`; return; }
+        linhaCabecalhoDetectada = j.linha_cabecalho;
+        const cols = j.colunas;
+        const findCol = (...termos) => {
+          for (const t of termos) {
+            const achado = cols.find(c => c.toLowerCase().includes(t));
+            if (achado) return achado;
+          }
+          return cols[0];
+        };
+        const guessNumero = findCol('ponto', 'numero', 'número', 'id', 'amostra');
+        const guessLat = findCol('lat');
+        const guessLon = findCol('lon', 'lng');
+        renderMapeamento(cols, j.colunas_sugeridas_atributo, guessNumero, guessLat, guessLon);
+        const infoUnid = j.linha_unidades_detectada ? ' (uma linha de unidades logo abaixo foi detectada e será ignorada)' : '';
+        document.getElementById('cadImpColMap').insertAdjacentHTML('afterbegin',
+          `<div class="hint" style="margin-bottom:8px;">Cabeçalho encontrado na linha ${j.linha_cabecalho} do arquivo${infoUnid} — ${j.n_linhas_dados} linhas de dados detectadas.</div>`);
+      })
+      .catch(e => { document.getElementById('cadImpColMap').innerHTML = `<div class="note">Falha ao processar: ${e.message}</div>`; });
   };
 
   btnImp.onclick = async () => {
@@ -1011,17 +1109,102 @@ function afterCadastro(){
       document.getElementById('cadImpMsg').textContent = 'As colunas de número/latitude/longitude precisam ser diferentes entre si — confira o mapeamento acima.';
       return;
     }
+    const colunasAtributo = Array.from(document.querySelectorAll('.atribChk:checked'))
+      .map(el => el.value).filter(c => ![colNumero,colLat,colLon].includes(c));
+
+    document.getElementById('cadImpMsg').textContent = 'Importando…';
     const fd = new FormData();
-    fd.append('arquivo', csvInput.files[0]);
+    fd.append('arquivo', arqInput.files[0]);
     fd.append('col_numero', colNumero);
     fd.append('col_lat', colLat);
     fd.append('col_lon', colLon);
-    const r = await fetch(`${API_BASE}/talhoes/${talId}/safras/${safId}/amostras/importar`, {method:'POST', body:fd});
+
+    let url;
+    if (modoArquivo === 'planilha') {
+      url = `${API_BASE}/talhoes/${talId}/safras/${safId}/amostras/importar_planilha`;
+      fd.append('linha_cabecalho', linhaCabecalhoDetectada);
+      fd.append('colunas_atributo', JSON.stringify(colunasAtributo));
+    } else {
+      url = `${API_BASE}/talhoes/${talId}/safras/${safId}/amostras/importar`;
+    }
+    const r = await fetch(url, {method:'POST', body:fd});
     const j = await r.json();
     document.getElementById('cadImpMsg').textContent = r.ok
       ? `Importado: ${j.amostras_importadas} amostras, ${j.resultados_importados} resultados. Troque para esse talhão/safra no topo da página para ver os mapas.`
       : `Erro: ${j.detail||r.status}`;
+    if (r.ok) refreshDelecaoListas();
   };
+}
+
+/* ---- Exclusão de propriedades / talhões / safras (irreversível — confirmação por digitação do nome) ---- */
+async function refreshDelecaoListas(){
+  const props = await (await fetch(`${API_BASE}/propriedades`)).json();
+  const talhoes = await (await fetch(`${API_BASE}/talhoes`)).json();
+  window._propsCache = props;
+  window._talhoesCache = talhoes;
+
+  document.getElementById('delPropsBody').innerHTML = props.map(p => `
+    <tr><td>${p.nome}</td><td class="num">${p.n_talhoes}</td>
+    <td><button class="btn ghost" style="padding:4px 10px;font-size:11.5px;color:#a33;" data-tipo="propriedade" data-id="${p.id}" data-nome="${p.nome}">Excluir</button></td></tr>
+  `).join('') || '<tr><td colspan="3" class="hint">Nenhuma propriedade.</td></tr>';
+
+  document.getElementById('delTalhoesBody').innerHTML = talhoes.map(t => `
+    <tr><td>${t.nome}</td><td>${t.fazenda}</td><td class="num">${t.n_safras}</td><td class="num">${t.n_amostras}</td>
+    <td><button class="btn ghost" style="padding:4px 10px;font-size:11.5px;color:#a33;" data-tipo="talhao" data-id="${t.id}" data-nome="${t.nome}">Excluir</button></td></tr>
+  `).join('') || '<tr><td colspan="5" class="hint">Nenhum talhão.</td></tr>';
+
+  const selTal = document.getElementById('delSafTalSel');
+  selTal.innerHTML = talhoes.map(t=>`<option value="${t.id}">${t.propriedade} / ${t.fazenda} / ${t.nome}</option>`).join('') || '<option value="">Nenhum talhão</option>';
+  selTal.onchange = () => carregarSafrasParaExcluir(selTal.value);
+  if (talhoes.length) carregarSafrasParaExcluir(selTal.value);
+  else document.getElementById('delSafrasBody').innerHTML = '<tr><td colspan="4" class="hint">—</td></tr>';
+
+  document.querySelectorAll('#delPropsBody button, #delTalhoesBody button').forEach(btn => {
+    btn.onclick = () => confirmarEExcluir(btn.dataset.tipo, btn.dataset.id, btn.dataset.nome);
+  });
+}
+
+async function carregarSafrasParaExcluir(talId){
+  if (!talId) { document.getElementById('delSafrasBody').innerHTML = ''; return; }
+  const safras = await (await fetch(`${API_BASE}/talhoes/${talId}/safras`)).json();
+  document.getElementById('delSafrasBody').innerHTML = safras.map(s => `
+    <tr><td>${s.nome}</td><td>${s.cultura||'—'}</td><td class="num">${s.n_amostras}</td>
+    <td><button class="btn ghost" style="padding:4px 10px;font-size:11.5px;color:#a33;" data-tipo="safra" data-talhao="${talId}" data-id="${s.id}" data-nome="${s.nome}">Excluir</button></td></tr>
+  `).join('') || '<tr><td colspan="4" class="hint">Nenhuma safra neste talhão.</td></tr>';
+  document.querySelectorAll('#delSafrasBody button').forEach(btn => {
+    btn.onclick = () => confirmarEExcluir('safra', btn.dataset.id, btn.dataset.nome, btn.dataset.talhao);
+  });
+}
+
+async function confirmarEExcluir(tipo, id, nome, talhaoIdPai){
+  const rotulo = {propriedade:'a propriedade', talhao:'o talhão', safra:'a safra'}[tipo];
+  const digitado = window.prompt(`Isso vai apagar ${rotulo} "${nome}" e TUDO que está dentro dela (dados não recuperáveis).\n\nPara confirmar, digite exatamente o nome abaixo:\n${nome}`);
+  if (digitado === null) return; // cancelou
+  if (digitado.trim() !== nome) {
+    document.getElementById('delMsg').textContent = 'Nome não bateu — nada foi excluído.';
+    return;
+  }
+  let url;
+  if (tipo === 'propriedade') url = `${API_BASE}/propriedades/${id}`;
+  else if (tipo === 'talhao') url = `${API_BASE}/talhoes/${id}`;
+  else url = `${API_BASE}/talhoes/${talhaoIdPai}/safras/${id}`;
+
+  const r = await fetch(url, {method:'DELETE'});
+  const j = await r.json().catch(()=>({}));
+  document.getElementById('delMsg').textContent = r.ok
+    ? `Excluído: ${j.nome}.`
+    : `Erro: ${j.detail||r.status}`;
+  if (!r.ok) return;
+
+  await refreshCadastroSelects();
+  await refreshDelecaoListas();
+
+  // se o item excluído era o que estava aberto no app, troca pra outro automaticamente
+  const talhaoAfetado = tipo === 'talhao' ? id : (tipo === 'safra' ? talhaoIdPai : null);
+  const precisaTrocar = tipo === 'propriedade'
+    ? !window._talhoesCache?.some(t => t.id === CURRENT_TALHAO_ID)
+    : (talhaoAfetado === CURRENT_TALHAO_ID && (tipo === 'talhao' || id === CURRENT_SAFRA_ID));
+  if (precisaTrocar) { await loadTalhoesList(); boot(); }
 }
 
 /* ================= PANEL: COMPARAR SAFRAS ================= */
