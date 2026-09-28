@@ -168,14 +168,37 @@
 </head>
 <body>
 
-<div id="shell">
+<div id="loginScreen" style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg);padding:20px;">
+  <div style="width:100%;max-width:380px;">
+    <div style="text-align:center;margin-bottom:22px;">
+      <div style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:20px;">◆ Talhão</div>
+      <div style="font-size:11px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.06em;">Agricultura de Precisão</div>
+    </div>
+    <div class="card">
+      <div class="tabs-sub" style="margin-bottom:16px;">
+        <button id="tabEntrar" class="active" onclick="mudarModoLogin('entrar')">Entrar</button>
+        <button id="tabCriar" onclick="mudarModoLogin('criar')">Criar conta</button>
+      </div>
+      <div id="campoNome" class="field" style="display:none;"><label>Nome</label><input type="text" id="loginNome"></div>
+      <div class="field"><label>E-mail</label><input type="text" id="loginEmail" autocomplete="username"></div>
+      <div class="field"><label>Senha</label><input type="password" id="loginSenha" autocomplete="current-password"></div>
+      <button class="btn" id="btnLoginSubmit" style="width:100%;margin-top:6px;">Entrar</button>
+      <div id="loginMsg" class="hint" style="margin-top:10px;min-height:16px;"></div>
+    </div>
+  </div>
+</div>
+
+<div id="shell" style="display:none;">
   <aside id="sidebar">
     <div class="brand">
       <div class="k">◆ Talhão</div>
       <div class="sub">Agricultura de Precisão</div>
     </div>
     <nav id="navList"></nav>
-    <div class="sidebar-foot">Protótipo funcional · dados reais do talhão GraxaimFrente · 11 amostras</div>
+    <div class="sidebar-foot">
+      <div id="usuarioLogado" style="margin-bottom:8px;"></div>
+      <button onclick="fazerLogout()" style="background:none;border:1px solid #3A4130;color:var(--sidebar-ink-dim);border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer;">Sair</button>
+    </div>
   </aside>
 
   <main id="main">
@@ -208,10 +231,96 @@ let CURRENT_SAFRA_ID = null;
 let TALHOES_LIST = [];
 let SAFRAS_LIST = [];
 
+/* ================= AUTENTICAÇÃO ================= */
+const TOKEN_KEY = 'ap_agro_token';
+const USUARIO_KEY = 'ap_agro_usuario';
+let AUTH_TOKEN = localStorage.getItem(TOKEN_KEY) || null;
+let USUARIO_ATUAL = JSON.parse(localStorage.getItem(USUARIO_KEY) || 'null');
+
+// Intercepta toda chamada fetch() que vai pra API: adiciona o token de
+// autenticação automaticamente, e se a API responder 401 (sessão inválida/
+// expirada), desloga e mostra a tela de login de novo — sem precisar
+// caçar cada uma das ~20 chamadas fetch espalhadas pelo resto do arquivo.
+const _fetchOriginal = window.fetch.bind(window);
+window.fetch = async function(url, opts = {}) {
+  const ehApi = typeof url === 'string' && url.startsWith(API_BASE);
+  if (ehApi && AUTH_TOKEN) {
+    opts = {...opts, headers: {...(opts.headers||{}), 'Authorization': 'Bearer ' + AUTH_TOKEN}};
+  }
+  const resp = await _fetchOriginal(url, opts);
+  if (ehApi && resp.status === 401 && !url.includes('/auth/')) {
+    fazerLogout('Sua sessão expirou — entre de novo.');
+    throw new Error('Sessão expirada');
+  }
+  return resp;
+};
+
+function mudarModoLogin(modo) {
+  const criar = modo === 'criar';
+  document.getElementById('tabEntrar').classList.toggle('active', !criar);
+  document.getElementById('tabCriar').classList.toggle('active', criar);
+  document.getElementById('campoNome').style.display = criar ? 'block' : 'none';
+  document.getElementById('btnLoginSubmit').textContent = criar ? 'Criar conta' : 'Entrar';
+  document.getElementById('btnLoginSubmit').dataset.modo = modo;
+  document.getElementById('loginMsg').textContent = '';
+}
+
+async function enviarLogin() {
+  const modo = document.getElementById('btnLoginSubmit').dataset.modo || 'entrar';
+  const email = document.getElementById('loginEmail').value.trim();
+  const senha = document.getElementById('loginSenha').value;
+  const msg = document.getElementById('loginMsg');
+  if (!email || !senha) { msg.textContent = 'Preencha e-mail e senha.'; return; }
+
+  const body = modo === 'criar'
+    ? {nome: document.getElementById('loginNome').value.trim(), email, senha}
+    : {email, senha};
+  if (modo === 'criar' && !body.nome) { msg.textContent = 'Preencha seu nome.'; return; }
+
+  msg.textContent = modo === 'criar' ? 'Criando conta…' : 'Entrando…';
+  try {
+    const resp = await fetch(`${API_BASE}/auth/${modo === 'criar' ? 'registrar' : 'login'}`, {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body),
+    });
+    const j = await resp.json();
+    if (!resp.ok) { msg.textContent = j.detail || 'Erro ao entrar.'; return; }
+    AUTH_TOKEN = j.access_token;
+    USUARIO_ATUAL = j.usuario;
+    localStorage.setItem(TOKEN_KEY, AUTH_TOKEN);
+    localStorage.setItem(USUARIO_KEY, JSON.stringify(USUARIO_ATUAL));
+    mostrarApp();
+  } catch (e) {
+    msg.textContent = 'Não consegui falar com a API — verifique sua conexão.';
+  }
+}
+
+function fazerLogout(mensagem) {
+  AUTH_TOKEN = null; USUARIO_ATUAL = null;
+  localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(USUARIO_KEY);
+  document.getElementById('shell').style.display = 'none';
+  document.getElementById('loginScreen').style.display = 'flex';
+  document.getElementById('loginEmail').value = '';
+  document.getElementById('loginSenha').value = '';
+  document.getElementById('loginMsg').textContent = mensagem || '';
+}
+
+function mostrarApp() {
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('shell').style.display = 'flex';
+  const el = document.getElementById('usuarioLogado');
+  if (el && USUARIO_ATUAL) el.innerHTML = `<div style="font-size:12px;color:var(--sidebar-ink);">${USUARIO_ATUAL.nome}</div><div style="font-size:10.5px;color:var(--sidebar-ink-dim);">${USUARIO_ATUAL.email}</div>`;
+  boot();
+}
+
 async function resolveTalhaoId() {
   if (TALHAO_ID_INICIAL) return TALHAO_ID_INICIAL;
   const resp = await fetch(`${API_BASE}/talhoes/_first`);
-  if (!resp.ok) throw new Error("Nenhum talhão encontrado — rode o seed.py do backend, ou cadastre um talhão na aba Cadastro.");
+  if (resp.status === 404) {
+    const err = new Error("Você ainda não tem nenhum talhão cadastrado.");
+    err.semTalhoes = true;
+    throw err;
+  }
+  if (!resp.ok) throw new Error("Nenhum talhão encontrado.");
   return (await resp.json()).id;
 }
 
@@ -922,8 +1031,8 @@ function panelCadastro(){
   </div>
 
   <div class="note soft" style="margin-top:14px;">
-    Ainda não há login — toda propriedade criada aqui fica associada ao usuário padrão do seed.
-    Autenticação multiusuário é o próximo passo natural depois deste módulo.
+    Toda propriedade criada aqui fica associada à sua conta (${USUARIO_ATUAL ? USUARIO_ATUAL.email : ''})
+    e só você consegue ver ou mexer nela.
   </div>`;
 }
 
@@ -987,7 +1096,10 @@ function afterCadastro(){
     const r = await fetch(`${API_BASE}/fazendas/${fazId}/talhoes`, {method:'POST', body:fd});
     const j = await r.json();
     document.getElementById('cadTalMsg').textContent = r.ok ? `Criado: ${j.nome} (${fmt(j.area_ha,1)} ha)` : `Erro: ${j.detail||r.status}`;
-    if (r.ok) { await refreshCadastroSelects(); await loadTalhoesList(); renderContext(); refreshDelecaoListas(); }
+    if (r.ok) {
+      if (!DATA) { boot(); return; } // era o primeiro talhão do usuário — carrega o app do zero, direito
+      await refreshCadastroSelects(); await loadTalhoesList(); renderContext(); refreshDelecaoListas();
+    }
   };
 
   document.getElementById('btnCriarSaf').onclick = async () => {
@@ -1273,6 +1385,7 @@ function renderPanel(){
 }
 
 function renderContext(){
+  if (!DATA || !document.getElementById('contextPill')) return; // ainda não há talhão carregado (ex.: primeiro acesso, antes do cadastro)
   const talhaoOpts = TALHOES_LIST.map(t=>`<option value="${t.id}" ${t.id===CURRENT_TALHAO_ID?'selected':''}>${t.nome} — ${t.fazenda}</option>`).join('');
   const safraOpts = SAFRAS_LIST.map(s=>`<option value="${s.id}" ${s.id===CURRENT_SAFRA_ID?'selected':''}>${s.nome}${s.cultura? ' · '+s.cultura : ''}</option>`).join('');
   document.getElementById('contextPill').innerHTML = `
@@ -1318,6 +1431,16 @@ async function boot(){
     renderContext();
     setTab('dashboard');
   } catch (err) {
+    if (err.semTalhoes) {
+      main.innerHTML = `
+        <div class="topbar">
+          <div><h1 id="pageTitle">Bem-vindo(a)!</h1><div class="desc" id="pageDesc">Você ainda não tem nenhum talhão cadastrado — vamos criar o primeiro logo abaixo.</div></div>
+        </div>
+        <div id="panels"></div>
+      `;
+      setTab('cadastro');
+      return;
+    }
     main.innerHTML = `<div style="max-width:520px;margin:60px auto;text-align:center;">
       <h2 style="font-family:'Space Grotesk',sans-serif;">Não consegui falar com a API</h2>
       <p style="color:var(--ink-soft);font-size:13px;line-height:1.6;">
@@ -1332,11 +1455,18 @@ async function boot(){
 }
 
 /* Página estática original (dados congelados) só é montada DEPOIS que DATA/GEO existem */
-if (DATA && GEO) {
-  renderContext();
-  setTab('dashboard');
+document.getElementById('btnLoginSubmit').dataset.modo = 'entrar';
+document.getElementById('btnLoginSubmit').onclick = enviarLogin;
+document.getElementById('loginSenha').addEventListener('keydown', e => { if (e.key === 'Enter') enviarLogin(); });
+
+if (AUTH_TOKEN) {
+  // já tem token salvo de uma visita anterior — confirma que ainda é válido antes de entrar direto
+  fetch(`${API_BASE}/auth/eu`).then(r => {
+    if (r.ok) mostrarApp();
+    else fazerLogout();
+  }).catch(() => fazerLogout('Não consegui confirmar sua sessão — entre de novo.'));
 } else {
-  boot();
+  document.getElementById('loginScreen').style.display = 'flex';
 }
 </script>
 
