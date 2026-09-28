@@ -7,7 +7,7 @@ Rodar localmente:
 
 Docs interativas automáticas em /docs (Swagger) assim que estiver no ar.
 """
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import psycopg2
 import psycopg2.extras
@@ -46,13 +46,127 @@ def get_cursor():
         conn.close()
 
 
+# ============================================================
+# Autenticação (JWT) — login, cadastro, e isolamento de dados por usuário
+# ============================================================
+import bcrypt, jwt
+from datetime import datetime, timedelta, timezone
+from fastapi import Header
+from pydantic import BaseModel
+
+# Em produção, defina JWT_SECRET como variável de ambiente no Render — sem
+# isso, qualquer um que veja o código-fonte poderia forjar tokens válidos.
+JWT_SECRET = os.getenv("JWT_SECRET", "chave-de-desenvolvimento-troque-em-producao")
+JWT_ALGO = "HS256"
+JWT_EXPIRA_HORAS = 24 * 30  # 30 dias — app de uso contínuo, não uma sessão web de escritório
+
+
+class RegistrarBody(BaseModel):
+    nome: str
+    email: str
+    senha: str
+
+
+class LoginBody(BaseModel):
+    email: str
+    senha: str
+
+
+def _hash_senha(senha: str) -> str:
+    return bcrypt.hashpw(senha.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def _checar_senha(senha: str, hash_salvo: str) -> bool:
+    try:
+        return bcrypt.checkpw(senha.encode("utf-8"), hash_salvo.encode("utf-8"))
+    except (ValueError, TypeError):
+        return False
+
+
+def _criar_token(usuario_id: str) -> str:
+    payload = {
+        "sub": str(usuario_id),
+        "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRA_HORAS),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGO)
+
+
+def get_usuario_atual(authorization: str | None = Header(default=None)) -> str:
+    """
+    Dependency do FastAPI: exige um header 'Authorization: Bearer <token>'
+    válido em toda rota que a usa, e devolve o id do usuário autenticado.
+    """
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "Não autenticado — faça login primeiro.")
+    token = authorization.removeprefix("Bearer ").strip()
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGO])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(401, "Sessão expirada — faça login de novo.")
+    except jwt.InvalidTokenError:
+        raise HTTPException(401, "Token inválido — faça login de novo.")
+    return payload["sub"]
+
+
+def _dono_propriedade(cur, propriedade_id: str, usuario_id: str) -> bool:
+    cur.execute("SELECT 1 FROM propriedades WHERE id = %s AND usuario_id = %s;", (propriedade_id, usuario_id))
+    return cur.fetchone() is not None
+
+
+def _dono_fazenda(cur, fazenda_id: str, usuario_id: str) -> bool:
+    cur.execute("""SELECT 1 FROM fazendas f JOIN propriedades p ON p.id = f.propriedade_id
+                   WHERE f.id = %s AND p.usuario_id = %s;""", (fazenda_id, usuario_id))
+    return cur.fetchone() is not None
+
+
+def _dono_talhao(cur, talhao_id: str, usuario_id: str) -> bool:
+    cur.execute("""SELECT 1 FROM talhoes t JOIN fazendas f ON f.id = t.fazenda_id
+                   JOIN propriedades p ON p.id = f.propriedade_id
+                   WHERE t.id = %s AND p.usuario_id = %s;""", (talhao_id, usuario_id))
+    return cur.fetchone() is not None
+
+
+@app.post("/auth/registrar")
+def registrar(body: RegistrarBody):
+    with get_cursor() as cur:
+        cur.execute("SELECT 1 FROM usuarios WHERE email = %s;", (body.email,))
+        if cur.fetchone():
+            raise HTTPException(400, "Já existe uma conta com esse e-mail.")
+        cur.execute("""INSERT INTO usuarios (nome, email, senha_hash, papel)
+                       VALUES (%s,%s,%s,'produtor') RETURNING id, nome, email;""",
+                    (body.nome, body.email, _hash_senha(body.senha)))
+        usuario = cur.fetchone()
+    return {"access_token": _criar_token(usuario["id"]), "usuario": usuario}
+
+
+@app.post("/auth/login")
+def login(body: LoginBody):
+    with get_cursor() as cur:
+        cur.execute("SELECT id, nome, email, senha_hash FROM usuarios WHERE email = %s;", (body.email,))
+        usuario = cur.fetchone()
+    if not usuario or not _checar_senha(body.senha, usuario["senha_hash"]):
+        raise HTTPException(401, "E-mail ou senha incorretos.")
+    return {"access_token": _criar_token(usuario["id"]),
+            "usuario": {"id": usuario["id"], "nome": usuario["nome"], "email": usuario["email"]}}
+
+
+@app.get("/auth/eu")
+def eu(usuario_id: str = Depends(get_usuario_atual)):
+    with get_cursor() as cur:
+        cur.execute("SELECT id, nome, email FROM usuarios WHERE id = %s;", (usuario_id,))
+        usuario = cur.fetchone()
+        if not usuario:
+            raise HTTPException(401, "Usuário não encontrado.")
+        return usuario
+
+
 @app.get("/")
 def root():
     return {"status": "ok", "service": "agricultura-precisao-api"}
 
 
 @app.get("/propriedades")
-def listar_propriedades():
+def listar_propriedades(usuario_id: str = Depends(get_usuario_atual)):
     with get_cursor() as cur:
         cur.execute("""
             SELECT p.id, p.nome, p.produtor, p.municipio, p.estado,
@@ -60,40 +174,63 @@ def listar_propriedades():
             FROM propriedades p
             LEFT JOIN fazendas f ON f.propriedade_id = p.id
             LEFT JOIN talhoes t ON t.fazenda_id = f.id
+            WHERE p.usuario_id = %s
             GROUP BY p.id
             ORDER BY p.nome;
-        """)
+        """, (usuario_id,))
         return cur.fetchall()
 
 
 @app.post("/propriedades")
-def criar_propriedade(nome: str = Form(...), produtor: str = Form(""), municipio: str = Form(""), estado: str = Form("")):
-    """Cria uma propriedade. Sem sistema de login ainda (item futuro do roteiro),
-    então toda propriedade fica associada ao primeiro usuário cadastrado no banco."""
+def criar_propriedade(nome: str = Form(...), produtor: str = Form(""), municipio: str = Form(""),
+                       estado: str = Form(""), usuario_id: str = Depends(get_usuario_atual)):
     with get_cursor() as cur:
-        cur.execute("SELECT id FROM usuarios ORDER BY criado_em LIMIT 1;")
-        u = cur.fetchone()
-        if not u:
-            raise HTTPException(400, "Nenhum usuário no banco — rode o seed.py ao menos uma vez.")
         cur.execute("""INSERT INTO propriedades (usuario_id, nome, produtor, municipio, estado)
                        VALUES (%s,%s,%s,%s,%s) RETURNING id, nome;""",
-                    (u["id"], nome, produtor, municipio, estado))
+                    (usuario_id, nome, produtor, municipio, estado))
         return cur.fetchone()
 
 
 @app.post("/propriedades/{propriedade_id}/fazendas")
-def criar_fazenda(propriedade_id: str, nome: str = Form(...)):
+def criar_fazenda(propriedade_id: str, nome: str = Form(...), usuario_id: str = Depends(get_usuario_atual)):
     with get_cursor() as cur:
+        if not _dono_propriedade(cur, propriedade_id, usuario_id):
+            raise HTTPException(404, "Propriedade não encontrada.")
         cur.execute("""INSERT INTO fazendas (propriedade_id, nome) VALUES (%s,%s)
                        RETURNING id, nome;""", (propriedade_id, nome))
         return cur.fetchone()
 
 
 @app.get("/propriedades/{propriedade_id}/fazendas")
-def listar_fazendas(propriedade_id: str):
+def listar_fazendas(propriedade_id: str, usuario_id: str = Depends(get_usuario_atual)):
     with get_cursor() as cur:
+        if not _dono_propriedade(cur, propriedade_id, usuario_id):
+            raise HTTPException(404, "Propriedade não encontrada.")
         cur.execute("SELECT id, nome FROM fazendas WHERE propriedade_id = %s ORDER BY nome;", (propriedade_id,))
         return cur.fetchall()
+
+
+@app.delete("/propriedades/{propriedade_id}")
+def excluir_propriedade(propriedade_id: str, usuario_id: str = Depends(get_usuario_atual)):
+    """
+    Exclui a propriedade e TUDO que está embaixo dela (fazendas, talhões,
+    safras, amostras, análises) — a cascata já está no schema (ON DELETE
+    CASCADE). Operação irreversível; a confirmação é responsabilidade do
+    front-end (o usuário digita o nome pra confirmar antes de chamar isso).
+    """
+    with get_cursor() as cur:
+        if not _dono_propriedade(cur, propriedade_id, usuario_id):
+            raise HTTPException(404, "Propriedade não encontrada.")
+        cur.execute("""
+            SELECT p.nome,
+                   (SELECT count(*) FROM fazendas f WHERE f.propriedade_id = p.id) AS n_fazendas,
+                   (SELECT count(*) FROM talhoes t JOIN fazendas f ON f.id=t.fazenda_id WHERE f.propriedade_id = p.id) AS n_talhoes,
+                   (SELECT count(*) FROM amostras a JOIN talhoes t ON t.id=a.talhao_id JOIN fazendas f ON f.id=t.fazenda_id WHERE f.propriedade_id = p.id) AS n_amostras
+            FROM propriedades p WHERE p.id = %s;
+        """, (propriedade_id,))
+        info = cur.fetchone()
+        cur.execute("DELETE FROM propriedades WHERE id = %s;", (propriedade_id,))
+        return {"excluido": True, **info}
 
 
 def _parse_kml_polygon(kml_text: str):
@@ -111,7 +248,8 @@ def _parse_kml_polygon(kml_text: str):
 
 @app.post("/fazendas/{fazenda_id}/talhoes")
 async def criar_talhao(fazenda_id: str, nome: str = Form(...), sistema_plantio: str = Form(""),
-                        kml_file: UploadFile | None = File(None), geojson_polygon: str | None = Form(None)):
+                        kml_file: UploadFile | None = File(None), geojson_polygon: str | None = Form(None),
+                        usuario_id: str = Depends(get_usuario_atual)):
     """
     Cria um talhão a partir de um arquivo KML (upload) OU de um GeoJSON de
     polígono colado como texto (campo geojson_polygon, formato
@@ -129,6 +267,8 @@ async def criar_talhao(fazenda_id: str, nome: str = Form(...), sistema_plantio: 
         raise HTTPException(400, "Envie kml_file ou geojson_polygon.")
 
     with get_cursor() as cur:
+        if not _dono_fazenda(cur, fazenda_id, usuario_id):
+            raise HTTPException(404, "Fazenda não encontrada.")
         cur.execute("""INSERT INTO talhoes (fazenda_id, nome, geom, sistema_plantio)
                        VALUES (%s,%s, ST_GeomFromText(%s,4326), %s)
                        RETURNING id, nome, area_ha;""", (fazenda_id, nome, wkt, sistema_plantio))
@@ -136,8 +276,8 @@ async def criar_talhao(fazenda_id: str, nome: str = Form(...), sistema_plantio: 
 
 
 @app.get("/talhoes")
-def listar_talhoes():
-    """Lista todos os talhões cadastrados — alimenta o seletor de talhão do app."""
+def listar_talhoes(usuario_id: str = Depends(get_usuario_atual)):
+    """Lista os talhões do usuário logado — alimenta o seletor de talhão do app."""
     with get_cursor() as cur:
         cur.execute("""
             SELECT t.id, t.nome, t.area_ha, f.nome AS fazenda, p.nome AS propriedade,
@@ -146,15 +286,36 @@ def listar_talhoes():
             FROM talhoes t
             JOIN fazendas f ON f.id = t.fazenda_id
             JOIN propriedades p ON p.id = f.propriedade_id
+            WHERE p.usuario_id = %s
             ORDER BY p.nome, f.nome, t.nome;
-        """)
+        """, (usuario_id,))
         return cur.fetchall()
+
+
+@app.delete("/talhoes/{talhao_id}")
+def excluir_talhao(talhao_id: str, usuario_id: str = Depends(get_usuario_atual)):
+    """Exclui o talhão e tudo embaixo dele (safras, amostras, análises, prescrições)."""
+    with get_cursor() as cur:
+        if not _dono_talhao(cur, talhao_id, usuario_id):
+            raise HTTPException(404, "Talhão não encontrado.")
+        cur.execute("""
+            SELECT t.nome,
+                   (SELECT count(*) FROM safras s WHERE s.talhao_id = t.id) AS n_safras,
+                   (SELECT count(*) FROM amostras a WHERE a.talhao_id = t.id) AS n_amostras
+            FROM talhoes t WHERE t.id = %s;
+        """, (talhao_id,))
+        info = cur.fetchone()
+        cur.execute("DELETE FROM talhoes WHERE id = %s;", (talhao_id,))
+        return {"excluido": True, **info}
 
 
 @app.post("/talhoes/{talhao_id}/safras")
 def criar_safra(talhao_id: str, nome: str = Form(...), cultura: str = Form(""),
-                 cultivar: str = Form(""), produtividade_esperada: float | None = Form(None)):
+                 cultivar: str = Form(""), produtividade_esperada: float | None = Form(None),
+                 usuario_id: str = Depends(get_usuario_atual)):
     with get_cursor() as cur:
+        if not _dono_talhao(cur, talhao_id, usuario_id):
+            raise HTTPException(404, "Talhão não encontrado.")
         cur.execute("""INSERT INTO safras (talhao_id, nome, cultura, cultivar, produtividade_esperada)
                        VALUES (%s,%s,%s,%s,%s) RETURNING id, nome, cultura;""",
                     (talhao_id, nome, cultura, cultivar, produtividade_esperada))
@@ -162,8 +323,10 @@ def criar_safra(talhao_id: str, nome: str = Form(...), cultura: str = Form(""),
 
 
 @app.get("/talhoes/{talhao_id}/safras")
-def listar_safras(talhao_id: str):
+def listar_safras(talhao_id: str, usuario_id: str = Depends(get_usuario_atual)):
     with get_cursor() as cur:
+        if not _dono_talhao(cur, talhao_id, usuario_id):
+            raise HTTPException(404, "Talhão não encontrado.")
         cur.execute("""
             SELECT s.id, s.nome, s.cultura, s.cultivar, s.produtividade_esperada,
                    (SELECT count(*) FROM amostras a WHERE a.safra_id = s.id) AS n_amostras
@@ -172,10 +335,33 @@ def listar_safras(talhao_id: str):
         return cur.fetchall()
 
 
+@app.delete("/talhoes/{talhao_id}/safras/{safra_id}")
+def excluir_safra(talhao_id: str, safra_id: str, usuario_id: str = Depends(get_usuario_atual)):
+    """
+    Exclui a safra E as amostras/análises associadas a ela. Por padrão o
+    banco só desvincularia as amostras (ON DELETE SET NULL) em vez de
+    apagá-las — aqui apagamos de propósito, porque uma safra "vazia" sem
+    suas amostras não é útil pro usuário.
+    """
+    with get_cursor() as cur:
+        if not _dono_talhao(cur, talhao_id, usuario_id):
+            raise HTTPException(404, "Talhão não encontrado.")
+        cur.execute("SELECT nome FROM safras WHERE id = %s AND talhao_id = %s;", (safra_id, talhao_id))
+        info = cur.fetchone()
+        if not info:
+            raise HTTPException(404, "Safra não encontrada neste talhão.")
+        cur.execute("SELECT count(*) AS n FROM amostras WHERE safra_id = %s;", (safra_id,))
+        n_amostras = cur.fetchone()["n"]
+        cur.execute("DELETE FROM amostras WHERE safra_id = %s;", (safra_id,))
+        cur.execute("DELETE FROM safras WHERE id = %s;", (safra_id,))
+        return {"excluido": True, "nome": info["nome"], "n_amostras": n_amostras}
+
+
 @app.post("/talhoes/{talhao_id}/safras/{safra_id}/amostras/importar")
 async def importar_amostras_csv(talhao_id: str, safra_id: str, arquivo: UploadFile = File(...),
                                  col_numero: str = Form(...), col_lat: str = Form(...),
-                                 col_lon: str = Form(...), col_prof: str | None = Form(None)):
+                                 col_lon: str = Form(...), col_prof: str | None = Form(None),
+                                 usuario_id: str = Depends(get_usuario_atual)):
     """
     Importa amostras de um CSV "largo" (uma coluna por atributo — igual a um
     laudo de laboratório exportado em planilha). O chamador informa quais
@@ -194,6 +380,8 @@ async def importar_amostras_csv(talhao_id: str, safra_id: str, arquivo: UploadFi
 
     n_amostras = n_analises = 0
     with get_cursor() as cur:
+        if not _dono_talhao(cur, talhao_id, usuario_id):
+            raise HTTPException(404, "Talhão não encontrado.")
         for row in reader:
             try:
                 lat = _parse_coord(row[col_lat])
@@ -310,7 +498,8 @@ def _montar_tabela(df_raw, linha_cabecalho: int):
 
 
 @app.post("/utils/preview_planilha")
-async def preview_planilha(arquivo: UploadFile = File(...), linha_cabecalho: int | None = Form(None)):
+async def preview_planilha(arquivo: UploadFile = File(...), linha_cabecalho: int | None = Form(None),
+                            usuario_id: str = Depends(get_usuario_atual)):
     """
     Primeiro passo da importação de uma planilha de laboratório "crua" (sem
     precisar limpar antes): lê o arquivo, detecta (ou usa a linha indicada)
@@ -361,7 +550,8 @@ async def preview_planilha(arquivo: UploadFile = File(...), linha_cabecalho: int
 async def importar_planilha(talhao_id: str, safra_id: str, arquivo: UploadFile = File(...),
                              linha_cabecalho: int = Form(...), col_numero: str = Form(...),
                              col_lat: str = Form(...), col_lon: str = Form(...),
-                             col_prof: str | None = Form(None), colunas_atributo: str = Form(...)):
+                             col_prof: str | None = Form(None), colunas_atributo: str = Form(...),
+                             usuario_id: str = Depends(get_usuario_atual)):
     """
     Segundo passo: com a linha de cabeçalho já confirmada, as colunas de
     localização mapeadas e a lista de quais colunas são atributos de solo
@@ -396,6 +586,8 @@ async def importar_planilha(talhao_id: str, safra_id: str, arquivo: UploadFile =
 
     n_amostras = n_analises = 0
     with get_cursor() as cur:
+        if not _dono_talhao(cur, talhao_id, usuario_id):
+            raise HTTPException(404, "Talhão não encontrado.")
         for _, row in data.iterrows():
             try:
                 lat = _parse_coord(row[col_lat])
@@ -430,9 +622,12 @@ async def importar_planilha(talhao_id: str, safra_id: str, arquivo: UploadFile =
 
 
 @app.get("/talhoes/{talhao_id}/safras/comparar")
-def comparar_safras(talhao_id: str, safra_a: str, safra_b: str, atributo: str):
+def comparar_safras(talhao_id: str, safra_a: str, safra_b: str, atributo: str,
+                     usuario_id: str = Depends(get_usuario_atual)):
     """Compara a média (e classe) de um atributo entre duas safras do mesmo talhão."""
     with get_cursor() as cur:
+        if not _dono_talhao(cur, talhao_id, usuario_id):
+            raise HTTPException(404, "Talhão não encontrado.")
         def resumo(safra_id):
             cur.execute("""
                 SELECT s.nome, AVG(al.valor) AS media, MIN(al.valor) AS minimo, MAX(al.valor) AS maximo,
@@ -451,23 +646,30 @@ def comparar_safras(talhao_id: str, safra_a: str, safra_b: str, atributo: str):
 
 
 @app.get("/talhoes/_first")
-def get_primeiro_talhao():
+def get_primeiro_talhao(usuario_id: str = Depends(get_usuario_atual)):
     """
-    Atalho de conveniência para demos com um único talhão: evita que o
-    front-end precise conhecer o UUID de antemão. Numa versão com múltiplos
-    talhões, isso vira um seletor na UI que lista /propriedades e navega.
+    Devolve o talhão mais antigo do usuário logado — evita que o front-end
+    precise conhecer o UUID de antemão ao abrir o app pela primeira vez.
     """
     with get_cursor() as cur:
-        cur.execute("SELECT id, nome FROM talhoes ORDER BY criado_em LIMIT 1;")
+        cur.execute("""
+            SELECT t.id, t.nome FROM talhoes t
+            JOIN fazendas f ON f.id = t.fazenda_id
+            JOIN propriedades p ON p.id = f.propriedade_id
+            WHERE p.usuario_id = %s
+            ORDER BY t.criado_em LIMIT 1;
+        """, (usuario_id,))
         row = cur.fetchone()
         if not row:
-            raise HTTPException(404, "Nenhum talhão cadastrado ainda. Rode o seed.py.")
+            raise HTTPException(404, "Você ainda não tem nenhum talhão cadastrado.")
         return row
 
 
 @app.get("/talhoes/{talhao_id}")
-def get_talhao(talhao_id: str):
+def get_talhao(talhao_id: str, usuario_id: str = Depends(get_usuario_atual)):
     with get_cursor() as cur:
+        if not _dono_talhao(cur, talhao_id, usuario_id):
+            raise HTTPException(404, "Talhão não encontrado.")
         cur.execute("""
             SELECT t.id, t.nome, t.area_ha, t.sistema_plantio,
                    ST_AsGeoJSON(t.geom)::json AS geometria,
@@ -485,9 +687,11 @@ def get_talhao(talhao_id: str):
 
 
 @app.get("/talhoes/{talhao_id}/elementos")
-def listar_elementos(talhao_id: str):
+def listar_elementos(talhao_id: str, usuario_id: str = Depends(get_usuario_atual)):
     """Lista os atributos de solo disponíveis para esse talhão (para popular um <select>)."""
     with get_cursor() as cur:
+        if not _dono_talhao(cur, talhao_id, usuario_id):
+            raise HTTPException(404, "Talhão não encontrado.")
         cur.execute("""
             SELECT DISTINCT al.atributo, al.unidade
             FROM analises_laboratoriais al
@@ -499,13 +703,15 @@ def listar_elementos(talhao_id: str):
 
 
 @app.get("/talhoes/{talhao_id}/amostras")
-def listar_amostras(talhao_id: str, atributo: str | None = None):
+def listar_amostras(talhao_id: str, atributo: str | None = None, usuario_id: str = Depends(get_usuario_atual)):
     """
     Amostras do talhão com geometria (GeoJSON), e opcionalmente o valor + classe
     de um atributo específico (join com regras_classificacao, origem Datafarm).
     Equivalente direto ao DATA.samples do protótipo HTML, mas vindo do banco.
     """
     with get_cursor() as cur:
+        if not _dono_talhao(cur, talhao_id, usuario_id):
+            raise HTTPException(404, "Talhão não encontrado.")
         if atributo:
             cur.execute("""
                 SELECT a.id, a.numero_ponto,
@@ -531,9 +737,11 @@ def listar_amostras(talhao_id: str, atributo: str | None = None):
 
 
 @app.get("/talhoes/{talhao_id}/amostras/{amostra_id}")
-def detalhe_amostra(talhao_id: str, amostra_id: str):
+def detalhe_amostra(talhao_id: str, amostra_id: str, usuario_id: str = Depends(get_usuario_atual)):
     """Todos os atributos de uma amostra específica — usado no popup de clique no mapa."""
     with get_cursor() as cur:
+        if not _dono_talhao(cur, talhao_id, usuario_id):
+            raise HTTPException(404, "Talhão não encontrado.")
         cur.execute("""
             SELECT al.atributo, al.valor, al.unidade
             FROM analises_laboratoriais al
@@ -558,7 +766,7 @@ def _resolve_safra_id(cur, talhao_id: str, safra_id: str | None):
 
 
 @app.get("/talhoes/{talhao_id}/app")
-def dados_completos_app(talhao_id: str, safra_id: str | None = None):
+def dados_completos_app(talhao_id: str, safra_id: str | None = None, usuario_id: str = Depends(get_usuario_atual)):
     """
     Endpoint único que devolve tudo que o app-cliente (HTML) precisa numa
     chamada só: talhão, amostras com TODOS os atributos já classificados,
@@ -576,8 +784,8 @@ def dados_completos_app(talhao_id: str, safra_id: str | None = None):
             FROM talhoes t
             JOIN fazendas f ON f.id = t.fazenda_id
             JOIN propriedades p ON p.id = f.propriedade_id
-            WHERE t.id = %s;
-        """, (talhao_id,))
+            WHERE t.id = %s AND p.usuario_id = %s;
+        """, (talhao_id, usuario_id))
         talhao = cur.fetchone()
         if not talhao:
             raise HTTPException(404, "Talhão não encontrado")
@@ -695,12 +903,15 @@ def dados_completos_app(talhao_id: str, safra_id: str | None = None):
 
 
 @app.post("/talhoes/{talhao_id}/recomendacao/calagem")
-def recomendar_calagem(talhao_id: str, v2: float = 70, prnt: float = 90, prof: float = 20, safra_id: str | None = None):
+def recomendar_calagem(talhao_id: str, v2: float = 70, prnt: float = 90, prof: float = 20,
+                        safra_id: str | None = None, usuario_id: str = Depends(get_usuario_atual)):
     """
     Método da saturação por bases — mesma fórmula do protótipo, mas calculada
     a partir dos dados reais no banco (V1 e CTC de cada amostra do talhão).
     """
     with get_cursor() as cur:
+        if not _dono_talhao(cur, talhao_id, usuario_id):
+            raise HTTPException(404, "Talhão não encontrado.")
         safra_id = _resolve_safra_id(cur, talhao_id, safra_id)
         filtro = "AND a.safra_id = %s" if safra_id else ""
         params = (talhao_id, safra_id) if safra_id else (talhao_id,)
@@ -791,7 +1002,7 @@ def _maior_anel(geom):
 
 
 @app.post("/talhoes/{talhao_id}/exportacao/shapefile")
-def exportar_shapefile(talhao_id: str, body: ExportShapefileBody):
+def exportar_shapefile(talhao_id: str, body: ExportShapefileBody, usuario_id: str = Depends(get_usuario_atual)):
     """
     Gera um Shapefile de prescrição (zonas de aplicação em polígono + dose)
     a partir das doses já calculadas no app (uma por amostra/zona), prontas
@@ -800,6 +1011,8 @@ def exportar_shapefile(talhao_id: str, body: ExportShapefileBody):
     dose_map = {d.numero_ponto: d.dose for d in body.doses}
 
     with get_cursor() as cur:
+        if not _dono_talhao(cur, talhao_id, usuario_id):
+            raise HTTPException(404, "Talhão não encontrado.")
         cur.execute("SELECT nome FROM talhoes WHERE id = %s;", (talhao_id,))
         trow = cur.fetchone()
         if not trow:
