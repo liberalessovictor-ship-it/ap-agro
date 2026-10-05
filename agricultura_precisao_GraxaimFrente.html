@@ -372,6 +372,28 @@ const CLASS_HEX = {
 const CLASS_ORDER = ['Muito Baixo','Baixo','Médio','Alto','Muito Alto'];
 const badgeClass = c => c ? c.replace(/\s/g,'') : '';
 
+// Paletas para atributos sem classificação agronômica (ex.: Altitude, Argila,
+// Hidrogênio+Alumínio) — nada de vermelho/verde aqui, porque não existe
+// "bom" ou "ruim" nesses casos, só uma variação contínua de valor.
+const RAMP_RELEVO   = ['#2B6E3F','#6FA85B','#B7C77A','#D8B978','#8C6A4E']; // baixo (verde) -> alto (marrom)
+const RAMP_NEUTRO   = ['#2B4C6E','#4A7A9C','#8FB8C9','#C9D8B8','#D9C77A']; // escala neutra azul->areia
+function interpolarCor(paleta, t){
+  t = Math.max(0, Math.min(1, t));
+  const n = paleta.length - 1;
+  const idx = t * n;
+  const i0 = Math.floor(idx), i1 = Math.min(i0+1, n);
+  const frac = idx - i0;
+  const c0 = paleta[i0].match(/\w\w/g).map(h=>parseInt(h,16));
+  const c1 = paleta[i1].match(/\w\w/g).map(h=>parseInt(h,16));
+  const mix = c0.map((v,k)=> Math.round(v + (c1[k]-v)*frac));
+  return '#' + mix.map(v=>v.toString(16).padStart(2,'0')).join('');
+}
+function corContinua(valor, min, max, elemento){
+  if (valor===null || valor===undefined || isNaN(valor) || max===min) return '#C9C4AF';
+  const t = (valor - min) / (max - min);
+  return interpolarCor(elemento === 'Altitude' ? RAMP_RELEVO : RAMP_NEUTRO, t);
+}
+
 let ELEMENT_LIST = [];
 const orderIdx = () => DATA.samples.map((s,i)=>i).sort((a,b)=>(parseInt(DATA.samples[a].id)||0)-(parseInt(DATA.samples[b].id)||0));
 const sortedSamples = () => orderIdx().map(i=>DATA.samples[i]);
@@ -561,12 +583,21 @@ function afterDashboard(){
 
 /* ================= PANEL: MAPA DE FERTILIDADE ================= */
 function panelMapa(){
+  const temClasse = DATA.samples.some(s => sampleClass(s, state.mapElement) !== null);
+  const unidade = DATA.elements_meta[state.mapElement].unidade;
+  const valores = DATA.samples.map(s=>sampleValue(s,state.mapElement)).filter(v=>v!==null && v!==undefined);
+  const vmin = Math.min(...valores), vmax = Math.max(...valores);
   return `
   <div class="grid map-layout">
     <div class="card">
-      <h3>${state.mapElement} <span class="tag">${DATA.elements_meta[state.mapElement].unidade}</span></h3>
+      <h3>${state.mapElement} <span class="tag">${unidade}</span></h3>
       <div id="mapaMap"></div>
-      ${legendRow(CLASS_ORDER)}
+      ${temClasse ? legendRow(CLASS_ORDER) : `
+        <div style="display:flex;align-items:center;gap:10px;margin-top:10px;font-size:11.5px;color:var(--ink-soft);">
+          <span>${fmt(vmin,1)}</span>
+          <div style="flex:1;height:10px;border-radius:5px;background:linear-gradient(90deg, ${(state.mapElement==='Altitude'?RAMP_RELEVO:RAMP_NEUTRO).join(',')});"></div>
+          <span>${fmt(vmax,1)}</span>
+        </div>`}
     </div>
     <div class="card">
       <h3>Selecionar atributo</h3>
@@ -576,20 +607,50 @@ function panelMapa(){
           ${ELEMENT_LIST.map(e=>`<option value="${e}" ${e===state.mapElement?'selected':''}>${e}</option>`).join('')}
         </select>
       </div>
-      <table>
-        <thead><tr><th>Amostra</th><th class="num">Valor</th><th>Classe</th></tr></thead>
+      ${!DATA.elements_meta['Altitude'] ? `
+      <div class="field" style="margin-top:12px;">
+        <button class="btn ghost" id="btnBuscarRelevo" style="width:100%;">Buscar dados de relevo (altitude)</button>
+        <div class="hint">Consulta uma API pública de elevação (SRTM) para cada ponto amostral e adiciona "Altitude" como atributo — só precisa fazer isso uma vez por talhão.</div>
+        <div id="relevoMsg" class="hint" style="margin-top:4px;"></div>
+      </div>` : ''}
+      <table style="margin-top:12px;">
+        <thead><tr><th>Amostra</th><th class="num">Valor</th><th>${temClasse ? 'Classe' : ''}</th></tr></thead>
         <tbody>
-        ${sortedSamples().map(s=>`<tr><td>#${s.id}</td><td class="num">${fmt(sampleValue(s,state.mapElement),2)}</td><td><span class="badge ${badgeClass(sampleClass(s,state.mapElement))}">${sampleClass(s,state.mapElement)||'—'}</span></td></tr>`).join('')}
+        ${sortedSamples().map(s=>`<tr><td>#${s.id}</td><td class="num">${fmt(sampleValue(s,state.mapElement),2)}</td><td>${temClasse ? `<span class="badge ${badgeClass(sampleClass(s,state.mapElement))}">${sampleClass(s,state.mapElement)||'—'}</span>` : ''}</td></tr>`).join('')}
         </tbody>
       </table>
     </div>
   </div>`;
 }
 function afterMapa(){
+  const temClasse = DATA.samples.some(s => sampleClass(s, state.mapElement) !== null);
+  const valores = DATA.samples.map(s=>sampleValue(s,state.mapElement)).filter(v=>v!==null && v!==undefined);
+  const vmin = Math.min(...valores), vmax = Math.max(...valores);
   const el = document.getElementById('mapaMap');
-  el.innerHTML = renderFieldMap((s)=> CLASS_HEX[sampleClass(s,state.mapElement)]);
-  attachMapEvents(el, s=>`#${s.id}: ${fmt(sampleValue(s,state.mapElement),2)} ${DATA.elements_meta[state.mapElement].unidade} · ${sampleClass(s,state.mapElement)}`);
+  el.innerHTML = renderFieldMap((s)=> temClasse
+    ? CLASS_HEX[sampleClass(s,state.mapElement)]
+    : corContinua(sampleValue(s,state.mapElement), vmin, vmax, state.mapElement));
+  attachMapEvents(el, s=>`#${s.id}: ${fmt(sampleValue(s,state.mapElement),2)} ${DATA.elements_meta[state.mapElement].unidade}${temClasse ? ' · '+sampleClass(s,state.mapElement) : ''}`);
   document.getElementById('mapElemSelect').onchange = e=>{ state.mapElement=e.target.value; renderPanel(); };
+
+  const btnRelevo = document.getElementById('btnBuscarRelevo');
+  if (btnRelevo) btnRelevo.onclick = async () => {
+    const msg = document.getElementById('relevoMsg');
+    btnRelevo.disabled = true;
+    msg.textContent = 'Buscando elevação (pode levar alguns segundos)…';
+    try {
+      const resp = await fetch(`${API_BASE}/talhoes/${CURRENT_TALHAO_ID}/relevo/atualizar`, {method:'POST'});
+      const j = await resp.json();
+      if (!resp.ok) { msg.textContent = 'Erro: ' + (j.detail || resp.status); btnRelevo.disabled = false; return; }
+      msg.textContent = `Pronto: ${j.atualizadas} amostra(s) atualizada(s). Recarregando…`;
+      await loadData(CURRENT_TALHAO_ID, CURRENT_SAFRA_ID);
+      state.mapElement = 'Altitude';
+      renderPanel();
+    } catch (e) {
+      msg.textContent = 'Falha: ' + e.message;
+      btnRelevo.disabled = false;
+    }
+  };
 }
 
 /* ================= PANEL: CALAGEM ================= */
