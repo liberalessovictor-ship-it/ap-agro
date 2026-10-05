@@ -835,6 +835,13 @@ def dados_completos_app(talhao_id: str, safra_id: str | None = None, usuario_id:
         """, params_amostras)
         elements_meta_rows = cur.fetchall()
 
+        # --- elevação (relevo), se já foi buscada — ver /relevo/atualizar ---
+        cur.execute(f"""
+            SELECT a.numero_ponto, a.elevacao_m
+            FROM amostras a WHERE a.talhao_id = %s {safra_filtro} AND a.elevacao_m IS NOT NULL;
+        """, params_amostras)
+        elevacoes_raw = cur.fetchall()
+
     # ---- montar "samples" (agrupando por amostra) ----
     samples_by_id = {}
     for r in rows:
@@ -847,9 +854,18 @@ def dados_completos_app(talhao_id: str, safra_id: str | None = None, usuario_id:
     for z in zonas_raw:
         if z["numero_ponto"] in samples_by_id:
             samples_by_id[z["numero_ponto"]]["area_ha"] = round(float(z["area_ha"]), 3)
+    tem_elevacao = False
+    for e in elevacoes_raw:
+        if e["numero_ponto"] in samples_by_id:
+            samples_by_id[e["numero_ponto"]]["values"]["Altitude"] = {
+                "v": round(float(e["elevacao_m"]), 1), "classe": None
+            }
+            tem_elevacao = True
     samples = [samples_by_id[k] for k in sorted(samples_by_id, key=lambda x: int(x))]
 
     elements_meta = {r["atributo"]: {"unidade": r["unidade"]} for r in elements_meta_rows}
+    if tem_elevacao:
+        elements_meta["Altitude"] = {"unidade": "m"}
 
     # ---- normalizar geometrias (lon/lat) para um viewBox SVG, igual ao protótipo ----
     field_coords = talhao["geometria"]["coordinates"][0]
@@ -1065,3 +1081,49 @@ def exportar_shapefile(talhao_id: str, body: ExportShapefileBody, usuario_id: st
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{base}.zip"'},
     )
+
+
+# ============================================================
+# Relevo (altitude) — busca elevação real de cada amostra numa API pública
+# ============================================================
+import urllib.request, urllib.parse, json as _json_mod
+
+
+@app.post("/talhoes/{talhao_id}/relevo/atualizar")
+def atualizar_relevo(talhao_id: str, usuario_id: str = Depends(get_usuario_atual)):
+    """
+    Busca a altitude de cada amostra do talhão que ainda não tem elevação
+    salva, usando a API pública Open Topo Data (dataset SRTM 30m, resolução
+    ~30m, cobertura global). Guarda o resultado no banco (coluna
+    amostras.elevacao_m) — assim só busca uma vez por amostra, não a cada
+    carregamento do mapa. É um endpoint separado do /app porque depende de
+    um serviço externo (mais lento, pode falhar se ele estiver fora do ar).
+    """
+    with get_cursor() as cur:
+        if not _dono_talhao(cur, talhao_id, usuario_id):
+            raise HTTPException(404, "Talhão não encontrado.")
+        cur.execute("""SELECT id, numero_ponto, ST_Y(geom) AS lat, ST_X(geom) AS lon
+                       FROM amostras WHERE talhao_id = %s AND elevacao_m IS NULL;""", (talhao_id,))
+        pendentes = cur.fetchall()
+        if not pendentes:
+            return {"atualizadas": 0, "ja_tinha": True, "mensagem": "Todas as amostras já têm elevação salva."}
+
+        locs = "|".join(f"{p['lat']},{p['lon']}" for p in pendentes)
+        url = "https://api.opentopodata.org/v1/srtm30m?locations=" + urllib.parse.quote(locs, safe="|,.-")
+        req = urllib.request.Request(url, headers={"User-Agent": "ap-agro-precisao/1.0 (+https://ap-agro.onrender.com)"})
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                dados = _json_mod.loads(resp.read().decode("utf-8"))
+        except Exception as e:
+            raise HTTPException(502, f"Não consegui buscar elevação no serviço externo (Open Topo Data): {e}")
+
+        if dados.get("status") != "OK":
+            raise HTTPException(502, f"Serviço de elevação retornou erro: {dados}")
+
+        n = 0
+        for p, r in zip(pendentes, dados.get("results", [])):
+            elev = r.get("elevation")
+            if elev is not None:
+                cur.execute("UPDATE amostras SET elevacao_m = %s WHERE id = %s;", (elev, p["id"]))
+                n += 1
+        return {"atualizadas": n, "total_pendentes": len(pendentes)}
